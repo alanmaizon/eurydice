@@ -19,7 +19,14 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     log_level: str = "INFO"
-    cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["http://localhost:5173"])
+    cors_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ]
+    )
     google_cloud_project: str | None = None
     google_cloud_location: str = "us-central1"
     gemini_api_key: str | None = None
@@ -41,7 +48,12 @@ class Settings(BaseSettings):
     @classmethod
     def parse_cors_origins(cls, value: Any) -> list[str]:
         if value in (None, ""):
-            return ["http://localhost:5173"]
+            return [
+                "http://localhost:3000",
+                "http://127.0.0.1:3000",
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+            ]
         if isinstance(value, list):
             return [str(item).strip() for item in value if str(item).strip()]
         if isinstance(value, str):

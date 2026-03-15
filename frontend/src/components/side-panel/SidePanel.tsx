@@ -65,7 +65,11 @@ export default function SidePanel() {
   }, [client, log]);
 
   const handleSubmit = () => {
-    client.send([{ text: textInput }]);
+    const trimmed = textInput.trim();
+    if (!connected || !trimmed) {
+      return;
+    }
+    client.send([{ text: trimmed }]);
 
     setTextInput("");
     if (inputRef.current) {
@@ -116,9 +120,7 @@ export default function SidePanel() {
           }}
         />
         <div className={cn("streaming-indicator", { connected })}>
-          {connected
-            ? `🔵${open ? " Streaming" : ""}`
-            : `⏸️${open ? " Paused" : ""}`}
+          {connected ? `Connected` : `Offline`}
         </div>
       </section>
       <div className="side-panel-container" ref={loggerRef}>
@@ -146,7 +148,7 @@ export default function SidePanel() {
               hidden: textInput.length,
             })}
           >
-            Type&nbsp;something...
+            Send a learner turn...
           </span>
 
           <button

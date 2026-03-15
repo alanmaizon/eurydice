@@ -29,6 +29,7 @@ import SettingsDialog from "../settings-dialog/SettingsDialog";
 export type ControlTrayProps = {
   videoRef: RefObject<HTMLVideoElement>;
   children?: ReactNode;
+  supportsAudio?: boolean;
   supportsVideo: boolean;
   onVideoStreamChange?: (stream: MediaStream | null) => void;
   enableEditingSettings?: boolean;
@@ -61,6 +62,7 @@ const MediaStreamButton = memo(
 function ControlTray({
   videoRef,
   children,
+  supportsAudio = true,
   onVideoStreamChange = () => {},
   supportsVideo,
   enableEditingSettings,
@@ -71,9 +73,10 @@ function ControlTray({
   const [webcam, screenCapture] = videoStreams;
   const [inVolume, setInVolume] = useState(0);
   const [audioRecorder] = useState(() => new AudioRecorder());
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(true);
   const renderCanvasRef = useRef<HTMLCanvasElement>(null);
   const connectButtonRef = useRef<HTMLButtonElement>(null);
+  const wasCapturingAudio = useRef(false);
 
   const { client, connected, connect, disconnect, volume } =
     useLiveAPIContext();
@@ -99,15 +102,22 @@ function ControlTray({
         },
       ]);
     };
-    if (connected && !muted && audioRecorder) {
+    const shouldCaptureAudio = supportsAudio && connected && !muted && !!audioRecorder;
+
+    if (shouldCaptureAudio) {
       audioRecorder.on("data", onData).on("volume", setInVolume).start();
+      wasCapturingAudio.current = true;
     } else {
       audioRecorder.stop();
+      if (wasCapturingAudio.current) {
+        client.endRealtimeTurn("stop_recording");
+        wasCapturingAudio.current = false;
+      }
     }
     return () => {
       audioRecorder.off("data", onData).off("volume", setInVolume);
     };
-  }, [connected, client, muted, audioRecorder]);
+  }, [connected, client, muted, audioRecorder, supportsAudio]);
 
   useEffect(() => {
     if (videoRef.current) {
@@ -163,16 +173,18 @@ function ControlTray({
     <section className="control-tray">
       <canvas style={{ display: "none" }} ref={renderCanvasRef} />
       <nav className={cn("actions-nav", { disabled: !connected })}>
-        <button
-          className={cn("action-button mic-button")}
-          onClick={() => setMuted(!muted)}
-        >
-          {!muted ? (
-            <span className="material-symbols-outlined filled">mic</span>
-          ) : (
-            <span className="material-symbols-outlined filled">mic_off</span>
-          )}
-        </button>
+        {supportsAudio ? (
+          <button
+            className={cn("action-button mic-button")}
+            onClick={() => setMuted(!muted)}
+          >
+            {!muted ? (
+              <span className="material-symbols-outlined filled">mic</span>
+            ) : (
+              <span className="material-symbols-outlined filled">mic_off</span>
+            )}
+          </button>
+        ) : null}
 
         <div className="action-button no-action outlined">
           <AudioPulse volume={volume} active={connected} hover={false} />

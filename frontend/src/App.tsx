@@ -14,30 +14,25 @@
  * limitations under the License.
  */
 
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import "./App.scss";
 import { LiveAPIProvider } from "./contexts/LiveAPIContext";
 import SidePanel from "./components/side-panel/SidePanel";
-import { Altair } from "./components/altair/Altair";
 import ControlTray from "./components/control-tray/ControlTray";
-import cn from "classnames";
 import { LiveClientOptions } from "./types";
-
-const API_KEY = process.env.REACT_APP_GEMINI_API_KEY as string;
-if (typeof API_KEY !== "string") {
-  throw new Error("set REACT_APP_GEMINI_API_KEY in .env");
-}
+import { TutorPanel } from "./components/tutor-panel/TutorPanel";
 
 const apiOptions: LiveClientOptions = {
-  apiKey: API_KEY,
+  apiBaseUrl: process.env.REACT_APP_API_BASE_URL,
+  runtimeUrl: process.env.REACT_APP_RUNTIME_URL,
+  websocketUrl: process.env.REACT_APP_LIVE_WS_URL,
+  clientName: "ancient-greek-live-console",
+  mode: "guided_reading",
+  preferredResponseLanguage: "English",
 };
 
 function App() {
-  // this video reference is used for displaying the active stream, whether that is the webcam or screen capture
-  // feel free to style as you see fit
   const videoRef = useRef<HTMLVideoElement>(null);
-  // either the screen capture, the video or null, if null we hide it
-  const [videoStream, setVideoStream] = useState<MediaStream | null>(null);
 
   return (
     <div className="App">
@@ -46,23 +41,14 @@ function App() {
           <SidePanel />
           <main>
             <div className="main-app-area">
-              {/* APP goes here */}
-              <Altair />
-              <video
-                className={cn("stream", {
-                  hidden: !videoRef.current || !videoStream,
-                })}
-                ref={videoRef}
-                autoPlay
-                playsInline
-              />
+              <TutorPanel />
             </div>
 
             <ControlTray
               videoRef={videoRef}
-              supportsVideo={true}
-              onVideoStreamChange={setVideoStream}
-              enableEditingSettings={true}
+              supportsAudio={false}
+              supportsVideo={false}
+              enableEditingSettings={false}
             >
               {/* put your own buttons here */}
             </ControlTray>
