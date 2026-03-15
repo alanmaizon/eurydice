@@ -1,133 +1,77 @@
-# Live API - Web Console
+# Frontend
 
-This repository contains a react-based starter app for using the [Live API](<[https://ai.google.dev/gemini-api](https://ai.google.dev/api/multimodal-live)>) over a websocket. It provides modules for streaming audio playback, recording user media such as from a microphone, webcam or screen capture as well as a unified log view to aid in development of your application.
+This frontend is now a Vite-based React console for the Ancient Greek Live Tutor. The UI still follows the official live-api web console structure, but the transport is no longer browser-to-Gemini. It talks to the local tutor backend over `/api/runtime` and `/ws/live`.
 
-[![Live API Demo](readme/thumbnail.png)](https://www.youtube.com/watch?v=J_q7JY1XxFE)
+## Stack
 
-Watch the demo of the Live API [here](https://www.youtube.com/watch?v=J_q7JY1XxFE).
+- React 18
+- TypeScript
+- Vite 8
+- Vitest
+- Sass
 
-## Usage
+## Node baseline
 
-To get started, [create a free Gemini API key](https://aistudio.google.com/apikey) and add it to the `.env` file. Then:
+- Node `22.12+`
+- npm `10+`
 
-```
-$ npm install && npm start
-```
+Use the repo-level `.nvmrc` if you want a quick local switch:
 
-We have provided several example applications on other branches of this repository:
-
-New demos with GenAI SDK:
-
-- [demos/proactive-audio](https://github.com/google-gemini/multimodal-live-api-web-console/tree/demos/proactive-audio) - demonstrates the Live API's [proactive audio feature](https://ai.google.dev/gemini-api/docs/live-guide#proactive-audio)
-
-
-Original demos:
-
-- [demos/GenExplainer](https://github.com/google-gemini/multimodal-live-api-web-console/tree/demos/genexplainer)
-- [demos/GenWeather](https://github.com/google-gemini/multimodal-live-api-web-console/tree/demos/genweather)
-- [demos/GenList](https://github.com/google-gemini/multimodal-live-api-web-console/tree/demos/genlist)
-
-## Example
-
-Below is an example of an entire application that will use Google Search grounding and then render graphs using [vega-embed](https://github.com/vega/vega-embed):
-
-```typescript
-import { type FunctionDeclaration, SchemaType } from "@google/generative-ai";
-import { useEffect, useRef, useState, memo } from "react";
-import vegaEmbed from "vega-embed";
-import { useLiveAPIContext } from "../../contexts/LiveAPIContext";
-
-export const declaration: FunctionDeclaration = {
-  name: "render_altair",
-  description: "Displays an altair graph in json format.",
-  parameters: {
-    type: SchemaType.OBJECT,
-    properties: {
-      json_graph: {
-        type: SchemaType.STRING,
-        description:
-          "JSON STRING representation of the graph to render. Must be a string, not a json object",
-      },
-    },
-    required: ["json_graph"],
-  },
-};
-
-export function Altair() {
-  const [jsonString, setJSONString] = useState<string>("");
-  const { client, setConfig } = useLiveAPIContext();
-
-  useEffect(() => {
-    setConfig({
-      model: "models/gemini-2.0-flash-exp",
-      systemInstruction: {
-        parts: [
-          {
-            text: 'You are my helpful assistant. Any time I ask you for a graph call the "render_altair" function I have provided you. Dont ask for additional information just make your best judgement.',
-          },
-        ],
-      },
-      tools: [{ googleSearch: {} }, { functionDeclarations: [declaration] }],
-    });
-  }, [setConfig]);
-
-  useEffect(() => {
-    const onToolCall = (toolCall: ToolCall) => {
-      console.log(`got toolcall`, toolCall);
-      const fc = toolCall.functionCalls.find(
-        (fc) => fc.name === declaration.name
-      );
-      if (fc) {
-        const str = (fc.args as any).json_graph;
-        setJSONString(str);
-      }
-    };
-    client.on("toolcall", onToolCall);
-    return () => {
-      client.off("toolcall", onToolCall);
-    };
-  }, [client]);
-
-  const embedRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (embedRef.current && jsonString) {
-      vegaEmbed(embedRef.current, JSON.parse(jsonString));
-    }
-  }, [embedRef, jsonString]);
-  return <div className="vega-embed" ref={embedRef} />;
-}
+```bash
+nvm use
 ```
 
-## development
+## Local development
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
-Project consists of:
+Start the backend first:
 
-- an Event-emitting websocket-client to ease communication between the websocket and the front-end
-- communication layer for processing audio in and out
-- a boilerplate view for starting to build your apps and view logs
+```bash
+PYTHONPATH=. python3 -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
+```
 
-## Available Scripts
+Then run the frontend:
 
-In the project directory, you can run:
+```bash
+cd frontend
+cp .env.example .env
+npm install
+npm start
+```
 
-### `npm start`
+The Vite dev server runs at `http://localhost:3000` and proxies backend requests and websocket traffic to `http://127.0.0.1:8000`.
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+## Environment
 
-The page will reload if you make edits.\
-You will also see any lint errors in the console.
+Only a small set of client-side overrides are supported:
 
-### `npm run build`
+```bash
+VITE_API_BASE_URL=http://localhost:8000
+# Local development only:
+# VITE_GEMINI_API_KEY=your-local-gemini-api-key
+# Optional:
+# VITE_RUNTIME_URL=http://localhost:8000/api/runtime
+# VITE_LIVE_WS_URL=ws://localhost:8000/ws/live
+```
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+If these are omitted during local development, Vite proxying handles `/api/*`, `/health*`, and `/ws/*`.
+If `VITE_GEMINI_API_KEY` is set in local development, the frontend forwards it
+to the backend during `client.hello` so the backend can still own Gemini Live,
+tools, and session state.
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+## Scripts
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+```bash
+npm start        # alias for vite dev
+npm run dev      # vite dev
+npm run build    # production build to dist/
+npm run preview  # preview the dist build
+npm run test     # vitest
+npm run typecheck
+```
 
-_This is an experiment showcasing the Live API, not an official Google product. We’ll do our best to support and maintain this experiment but your mileage may vary. We encourage open sourcing projects as a way of learning from each other. Please respect our and other creators' rights, including copyright and trademark rights when present, when sharing these works and creating derivative work. If you want more info on Google's policy, you can find that [here](https://developers.google.com/terms/site-policies)._
+## Current direction
+
+- The center panel is now tutor-specific instead of the old Altair demo.
+- The sidebar still behaves like a console/logger surface.
+- The live client is a compatibility layer over the backend websocket contract.
+- Mic and camera are intentionally secondary until the text loop is stable.

@@ -60,6 +60,7 @@ class ClientHelloEvent(LiveEventBase):
     mode: TutorMode | None = None
     target_text: str | None = None
     preferred_response_language: str | None = None
+    gemini_api_key: str | None = None
     capabilities: ClientCapabilities = Field(default_factory=ClientCapabilities)
     client_name: str = "frontend"
 

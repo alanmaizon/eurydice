@@ -23,9 +23,10 @@ import { LiveClientOptions } from "./types";
 import { TutorPanel } from "./components/tutor-panel/TutorPanel";
 
 const apiOptions: LiveClientOptions = {
-  apiBaseUrl: process.env.REACT_APP_API_BASE_URL,
-  runtimeUrl: process.env.REACT_APP_RUNTIME_URL,
-  websocketUrl: process.env.REACT_APP_LIVE_WS_URL,
+  apiBaseUrl: import.meta.env.VITE_API_BASE_URL,
+  runtimeUrl: import.meta.env.VITE_RUNTIME_URL,
+  websocketUrl: import.meta.env.VITE_LIVE_WS_URL,
+  geminiApiKey: import.meta.env.DEV ? import.meta.env.VITE_GEMINI_API_KEY : undefined,
   clientName: "ancient-greek-live-console",
   mode: "guided_reading",
   preferredResponseLanguage: "English",

@@ -41,9 +41,9 @@ backend/app/
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
+python3 -m pip install -r requirements.txt -r requirements-dev.txt
 cp .env.example .env
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python3 -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 If you want the websocket to connect upstream to Gemini Live instead of scaffold fallback mode, set one of:
@@ -53,6 +53,22 @@ If you want the websocket to connect upstream to Gemini Live instead of scaffold
 - `GOOGLE_API_KEY`
 
 Or configure Vertex mode with `TUTOR_GOOGLE_CLOUD_PROJECT`.
+
+For local debugging, the simplest path is the text-first live profile:
+
+- `TUTOR_LIVE_BACKEND_PROFILE=simple`
+- keeps session memory and reference loading
+- skips ADK/tool orchestration on normal turns
+- keeps Gemini Live native audio enabled while using the lighter turn pipeline
+
+Switch back to `TUTOR_LIVE_BACKEND_PROFILE=full` when you want the heavier audio-first/tool-enabled path again.
+
+For a project-owned local runtime instead of whichever global Python happens to be active, use:
+
+```bash
+./scripts/bootstrap-backend.sh
+./scripts/dev-backend.sh
+```
 
 ## What is still a stub
 

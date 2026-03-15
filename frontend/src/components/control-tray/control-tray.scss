@@ -48,7 +48,7 @@
 
 @property --volume {
   syntax: "length";
-  inherit: false;
+  inherits: false;
   initial-value: 0px;
 }
 

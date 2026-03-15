@@ -48,9 +48,9 @@ What is intentionally not implemented yet:
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
+python3 -m pip install -r requirements.txt -r requirements-dev.txt
 cp .env.example .env
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python3 -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### Frontend
@@ -65,9 +65,14 @@ npm run dev
 Or use the helper scripts from the repo root:
 
 ```bash
+./scripts/bootstrap-backend.sh
 ./scripts/dev-backend.sh
 ./scripts/dev-frontend.sh
 ```
+
+For local Gemini Live sessions driven from the frontend, add `VITE_GEMINI_API_KEY` to `frontend/.env` and run the frontend with `npm start` so the Vite dev server forwards that key during `client.hello`.
+
+For a calmer local loop while we stabilize the live agent, set `TUTOR_LIVE_BACKEND_PROFILE=simple` in `backend/.env`. That profile keeps session memory and local reference loading, skips the heavier orchestration path, and still uses Gemini Live native audio.
 
 ## Next steps
 

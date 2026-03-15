@@ -10,6 +10,7 @@ export type LiveClientOptions = {
   apiBaseUrl?: string;
   runtimeUrl?: string;
   websocketUrl?: string;
+  geminiApiKey?: string;
   clientName?: string;
   mode?: TutorMode;
   targetText?: string;

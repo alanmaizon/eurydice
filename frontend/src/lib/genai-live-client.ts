@@ -184,7 +184,11 @@ export class GenAILiveClient extends EventEmitter<LiveClientEventTypes> {
         this.audioChunkIndex = 0;
         this.imageFrameIndex = 0;
         this.activeRealtimeTurnId = null;
-        this.startPingLoop();
+        this.log("client.hello", {
+          hasGeminiApiKey: Boolean(this.options.geminiApiKey),
+          mode: this.options.mode || runtime?.default_mode || DEFAULT_MODE,
+          targetTextPresent: Boolean(this.options.targetText),
+        });
         this.sendJson({
           type: "client.hello",
           session_id: null,
@@ -192,6 +196,7 @@ export class GenAILiveClient extends EventEmitter<LiveClientEventTypes> {
           target_text: this.options.targetText,
           preferred_response_language:
             this.options.preferredResponseLanguage || "English",
+          gemini_api_key: this.options.geminiApiKey,
           client_name: this.options.clientName || "live-api-web-console",
           capabilities: {
             audio_input: true,
@@ -200,6 +205,7 @@ export class GenAILiveClient extends EventEmitter<LiveClientEventTypes> {
             supports_barge_in: true,
           },
         });
+        this.startPingLoop();
         this.log("client.open", `Connected to ${websocketUrl}`);
         this.emit("open");
         if (!settled) {
@@ -443,6 +449,13 @@ export class GenAILiveClient extends EventEmitter<LiveClientEventTypes> {
   }
 
   private handleServerError(event: ServerErrorEvent) {
+    if (event.retryable) {
+      this.log("server.notice", {
+        eventType: event.type,
+        payload: event,
+      });
+      return;
+    }
     const errorEvent = createErrorEvent(event.message);
     this.emit("error", errorEvent);
   }
@@ -456,7 +469,6 @@ export class GenAILiveClient extends EventEmitter<LiveClientEventTypes> {
 
   private startPingLoop() {
     this.stopPingLoop();
-    this.sendPing();
     this.pingIntervalId = window.setInterval(() => {
       this.sendPing();
     }, 15000);

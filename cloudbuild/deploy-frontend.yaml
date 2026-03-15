@@ -13,7 +13,7 @@ availableSecrets:
 
 steps:
   - id: install-frontend-deps
-    name: node:20
+    name: node:22
     entrypoint: bash
     args:
       - -c
@@ -23,7 +23,7 @@ steps:
         npm ci
 
   - id: build-frontend
-    name: node:20
+    name: node:22
     entrypoint: bash
     args:
       - -c
@@ -33,7 +33,7 @@ steps:
         VITE_API_BASE_URL="${_API_BASE_URL}" npm run build
 
   - id: deploy-firebase-hosting
-    name: node:20
+    name: node:22
     entrypoint: bash
     secretEnv:
       - FIREBASE_SERVICE_ACCOUNT_JSON

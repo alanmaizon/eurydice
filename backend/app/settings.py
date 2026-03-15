@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from functools import lru_cache
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     gemini_connect_timeout_seconds: float = 8.0
     gemini_live_model: str = "gemini-2.5-flash-native-audio-latest"
     gemini_response_model: str = "gemini-2.5-flash"
+    live_backend_profile: Literal["simple", "full"] = "full"
+    live_session_history_messages: int = Field(default=8, ge=1)
     use_google_adk: bool = True
     default_tutoring_mode: TutorMode = TutorMode.guided_reading
     websocket_path: str = "/ws/live"

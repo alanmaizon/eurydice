@@ -127,11 +127,15 @@ export function useLiveAPI(options: LiveClientOptions): UseLiveAPIResults {
 
   useEffect(() => {
     const { clearLogs } = useLoggerStore.getState();
+    const resumeAudioStreamer = () => {
+      void audioStreamerRef.current?.resume();
+    };
 
     const onOpen = () => {
       setConnected(true);
       clearLogs();
       setTranscript([]);
+      resumeAudioStreamer();
       setStatus({
         phase: "connected",
         detail: "Socket open. Waiting for backend session handshake.",
@@ -139,6 +143,7 @@ export function useLiveAPI(options: LiveClientOptions): UseLiveAPIResults {
     };
 
     const onClose = () => {
+      audioStreamerRef.current?.stop();
       setConnected(false);
       setStatus({
         phase: "closed",
@@ -148,16 +153,27 @@ export function useLiveAPI(options: LiveClientOptions): UseLiveAPIResults {
 
     const onError = (error: ErrorEvent) => {
       console.error("error", error);
+      audioStreamerRef.current?.stop();
       setStatus({
         phase: "error",
         detail: error.message || "Live session error",
       });
     };
 
-    const stopAudioStreamer = () => audioStreamerRef.current?.stop();
+    const stopAudioOutput = () => {
+      audioStreamerRef.current?.stop();
+    };
+    const completeAudioStreamer = () => audioStreamerRef.current?.complete();
 
-    const onAudio = (data: ArrayBuffer) =>
-      audioStreamerRef.current?.addPCM16(new Uint8Array(data));
+    const onAudio = (data: ArrayBuffer) => {
+      const streamer = audioStreamerRef.current;
+      if (!streamer) {
+        return;
+      }
+      void streamer.resume().then(() => {
+        streamer.addPCM16(new Uint8Array(data));
+      });
+    };
 
     const onBackendEvent = (event: BackendServerEvent) => {
       if ("session_id" in event && typeof event.session_id === "string") {
@@ -251,6 +267,10 @@ export function useLiveAPI(options: LiveClientOptions): UseLiveAPIResults {
             detail: event.message,
           });
           return;
+        case "server.output.text":
+          return;
+        case "server.output.audio":
+          return;
         case "server.turn":
           if (event.event === "turn_complete" || event.event === "generation_complete") {
             setStatus({
@@ -269,7 +289,8 @@ export function useLiveAPI(options: LiveClientOptions): UseLiveAPIResults {
       .on("error", onError)
       .on("open", onOpen)
       .on("close", onClose)
-      .on("interrupted", stopAudioStreamer)
+      .on("interrupted", stopAudioOutput)
+      .on("turncomplete", completeAudioStreamer)
       .on("audio", onAudio)
       .on("backendevent", onBackendEvent);
 
@@ -278,7 +299,8 @@ export function useLiveAPI(options: LiveClientOptions): UseLiveAPIResults {
         .off("error", onError)
         .off("open", onOpen)
         .off("close", onClose)
-        .off("interrupted", stopAudioStreamer)
+        .off("interrupted", stopAudioOutput)
+        .off("turncomplete", completeAudioStreamer)
         .off("audio", onAudio)
         .off("backendevent", onBackendEvent)
         .disconnect();

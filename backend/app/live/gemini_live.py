@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import platform
+import sys
 from collections.abc import Awaitable
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager
@@ -14,13 +16,45 @@ from ..settings import Settings
 from .protocol import protocol_contract_summary
 
 
-def _resolve_api_key(settings: Settings) -> str | None:
+def _resolve_api_key(settings: Settings, api_key_override: str | None = None) -> str | None:
     return (
+        api_key_override
+        or
         settings.gemini_api_key
         or os.getenv("TUTOR_GEMINI_API_KEY")
         or os.getenv("GEMINI_API_KEY")
         or os.getenv("GOOGLE_API_KEY")
     )
+
+
+def _python_runtime_label() -> str:
+    return f"{sys.executable} (Python {platform.python_version()})"
+
+
+def _google_genai_import_diagnostics() -> dict[str, Any]:
+    try:
+        import google.genai  # type: ignore
+    except ImportError as exc:
+        return {
+            "available": False,
+            "detail": (
+                "google-genai is not installed or not importable in the running backend "
+                f"environment: {_python_runtime_label()}. Original error: {exc}"
+            ),
+            "python_executable": sys.executable,
+            "python_version": platform.python_version(),
+        }
+
+    return {
+        "available": True,
+        "detail": (
+            "google-genai import succeeded in the running backend environment: "
+            f"{_python_runtime_label()}."
+        ),
+        "python_executable": sys.executable,
+        "python_version": platform.python_version(),
+        "module_path": getattr(google.genai, "__file__", None),
+    }
 
 
 @dataclass
@@ -122,11 +156,8 @@ class GeminiLiveGateway:
 
     @staticmethod
     def sdk_status() -> dict[str, Any]:
-        try:
-            import google.genai  # type: ignore  # noqa: F401
-        except ImportError:
-            return {"available": False, "detail": "google-genai is not installed yet"}
-        return {"available": True, "detail": "google-genai import succeeded"}
+        diagnostics = _google_genai_import_diagnostics()
+        return {"available": diagnostics["available"], "detail": diagnostics["detail"]}
 
     def credentials_status(self) -> dict[str, Any]:
         api_key = _resolve_api_key(self._settings)
@@ -148,42 +179,60 @@ class GeminiLiveGateway:
         *,
         system_prompt: str,
         tools: list[ToolDefinition],
+        api_key_override: str | None = None,
+        enable_tools: bool = True,
+        response_modalities: list[str] | None = None,
     ) -> GeminiLiveConnection:
         try:
             from google import genai  # type: ignore
             from google.genai import types  # type: ignore
         except ImportError as exc:
-            raise RuntimeError("google-genai is not installed in this environment") from exc
+            diagnostics = _google_genai_import_diagnostics()
+            raise RuntimeError(
+                f"{diagnostics['detail']} Install backend dependencies with "
+                "`python3 -m pip install -r backend/requirements.txt -r backend/requirements-dev.txt`."
+            ) from exc
 
-        creds = self.credentials_status()
-        if not creds["available"]:
+        api_key = _resolve_api_key(self._settings, api_key_override=api_key_override)
+        if not api_key and not self._settings.google_cloud_project:
+            creds = self.credentials_status()
             raise RuntimeError(str(creds["detail"]))
 
-        api_key = _resolve_api_key(self._settings)
         if api_key:
             client = genai.Client(api_key=api_key)
+            creds_mode = "api_key"
         else:
             client = genai.Client(
                 vertexai=True,
                 project=self._settings.google_cloud_project,
                 location=self._settings.google_cloud_location,
             )
+            creds_mode = "vertex_ai"
 
-        declarations = [
-            types.FunctionDeclaration(
-                name=tool.name,
-                description=tool.description,
-                parameters_json_schema=tool.input_schema or {"type": "object", "properties": {}},
-            )
-            for tool in tools
-        ]
+        declarations = []
+        if enable_tools:
+            declarations = [
+                types.FunctionDeclaration(
+                    name=tool.name,
+                    description=tool.description,
+                    parameters_json_schema=tool.input_schema or {"type": "object", "properties": {}},
+                )
+                for tool in tools
+            ]
+
+        requested_modalities = response_modalities or ["AUDIO"]
+        modality_map = {
+            "AUDIO": types.Modality.AUDIO,
+            "TEXT": types.Modality.TEXT,
+        }
+        live_modalities = [modality_map[modality] for modality in requested_modalities]
         session_resumption_config = None
-        if creds.get("mode") == "vertex_ai":
+        if creds_mode == "vertex_ai":
             # Vertex supports explicit transparent resumption control.
             session_resumption_config = types.SessionResumptionConfig(transparent=True)
         connect_config = types.LiveConnectConfig(
             system_instruction=system_prompt,
-            response_modalities=[types.Modality.AUDIO],
+            response_modalities=live_modalities,
             tools=[types.Tool(function_declarations=declarations)] if declarations else None,
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
@@ -217,7 +266,8 @@ class GeminiLiveGateway:
         notes = (
             "Gemini Live bridge is wired. The websocket will attempt upstream connection after "
             "client.hello; if credentials are missing it falls back to scaffold mode with error events. "
-            f"Credential status: {creds['detail']}."
+            f"Credential status: {creds['detail']}. "
+            f"Live backend profile: {self._settings.live_backend_profile}."
         )
         if media_summary:
             notes = f"{notes} Prepared media: {', '.join(media_summary)}."

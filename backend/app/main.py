@@ -91,6 +91,14 @@ _ANALYSIS_REQUEST_MARKERS = (
     "declension",
     "syntax",
 )
+_TRANSLATION_REQUEST_MARKERS = (
+    "translate",
+    "translation",
+    "meaning",
+    "what does it mean",
+    "what does this mean",
+    "gloss",
+)
 _FOCUS_WORD_STOPWORDS = {
     "analysis",
     "analyze",
@@ -121,6 +129,10 @@ _FOCUS_WORD_STOPWORDS = {
     "translation",
     "word",
 }
+
+
+def _is_simple_live_backend() -> bool:
+    return settings.live_backend_profile == "simple"
 
 
 def _decode_base64_payload(payload: str, *, field_name: str) -> bytes:
@@ -179,6 +191,8 @@ def _is_read_request(text: str) -> bool:
     return any(
         phrase in normalized
         for phrase in (
+            "read",
+            "read aloud",
             "can you read it",
             "read it",
             "read that",
@@ -187,6 +201,11 @@ def _is_read_request(text: str) -> bool:
             "could you read it",
         )
     )
+
+
+def _looks_like_translation_request(text: str) -> bool:
+    normalized = _compact_text(text).lower()
+    return any(marker in normalized for marker in _TRANSLATION_REQUEST_MARKERS)
 
 
 def _is_general_passage_selection_request(text: str) -> bool:
@@ -261,6 +280,41 @@ def _extract_focus_word_hint(text: str) -> str | None:
             continue
         return candidate
     return None
+
+
+def _build_simple_parse_reply(
+    *,
+    reference_label: str,
+    parse_result: dict[str, Any],
+) -> str:
+    focus_word = str(parse_result.get("focus_word", "")).strip() or "the opening word"
+    analysis = parse_result.get("analysis") or {}
+    part_of_speech = str(analysis.get("part_of_speech", "unknown")).replace("_", " ")
+    confidence = str(analysis.get("confidence", "low")).strip() or "low"
+
+    details: list[str] = []
+    for key in ("case", "number", "person", "tense", "mood", "tense_hint"):
+        value = str(analysis.get(key, "")).strip()
+        if value:
+            details.append(f"{key.replace('_', ' ')}: {value}")
+
+    translation_hint = str(parse_result.get("translation_hint", "")).strip()
+    syntax_hints = parse_result.get("syntax_hints") or []
+    syntax_hint = str(syntax_hints[0]).strip() if syntax_hints else ""
+
+    lines = [
+        f"Here is a quick local analysis for {reference_label}.",
+        f"Focus word: {focus_word}",
+        f"Likely part of speech: {part_of_speech} (confidence: {confidence})",
+    ]
+    if details:
+        lines.append("Details: " + "; ".join(details))
+    if translation_hint:
+        lines.append(f"Translation hint: {translation_hint}")
+    if syntax_hint:
+        lines.append(f"Syntax hint: {syntax_hint}")
+    lines.append("If you want, I can also read the line again or give the translation.")
+    return "\n".join(lines)
 
 
 def _normalize_preflight_tool_arguments(
@@ -382,12 +436,14 @@ def _build_session_context_message(
     target_reference: str | None,
     target_text: str | None,
     preferred_response_language: str,
+    max_messages: int | None = None,
 ) -> str:
     if not history:
         return ""
 
+    history_window = history[-max_messages:] if max_messages else history
     dialogue_lines = []
-    for item in history:
+    for item in history_window:
         label = "Learner" if item.get("role") == "user" else "Tutor"
         dialogue_lines.append(f"- {label}: {item.get('content', '')}")
     full_dialogue = "\n".join(dialogue_lines)
@@ -424,6 +480,71 @@ def _build_orchestration_context_payload(
         "tool_name": tool_name,
         "tool_result": tool_result,
     }
+
+
+def _build_scaffold_mode_reply(
+    *,
+    learner_text: str,
+    target_reference: str | None,
+    target_text: str | None,
+    preflight_tool_name: str | None = None,
+    preflight_result: dict[str, Any] | None = None,
+) -> str:
+    compact_learner_text = _compact_text(learner_text)
+    reference_label = target_reference or "the current passage"
+    setup_hint = (
+        "Set TUTOR_GEMINI_API_KEY and reconnect to enable full live tutor responses."
+    )
+
+    if (
+        preflight_tool_name == "parse_passage"
+        and isinstance(preflight_result, dict)
+        and preflight_result.get("status") == "ok"
+    ):
+        return (
+            f"I ran the local parse scaffold for {reference_label}. "
+            "The full tutor voice and guided explanation layer is still offline in this local session. "
+            f"{setup_hint}"
+        )
+
+    if (
+        preflight_tool_name == "grade_attempt"
+        and isinstance(preflight_result, dict)
+        and preflight_result.get("status") == "ok"
+    ):
+        return (
+            "I ran the local grading scaffold for your latest attempt, but the live tutor response layer "
+            f"is offline in this session. {setup_hint}"
+        )
+
+    if (
+        preflight_tool_name == "generate_drill"
+        and isinstance(preflight_result, dict)
+        and preflight_result.get("status") == "ok"
+    ):
+        return (
+            "I generated the local drill scaffold, but the live tutor response layer is offline in this "
+            f"session. {setup_hint}"
+        )
+
+    if target_text:
+        return (
+            f"I received your turn about {reference_label}. "
+            "This local backend is running in scaffold mode, so it can accept turns and run lightweight "
+            f"tools, but it will not generate a full tutoring reply until Gemini Live is configured. {setup_hint}"
+        )
+
+    if compact_learner_text:
+        return (
+            f'I received your turn: "{compact_learner_text}". '
+            "This local backend is running in scaffold mode, so it will not generate a full tutoring reply "
+            f"until Gemini Live is configured. {setup_hint}"
+        )
+
+    return (
+        "This local backend is running in scaffold mode, so it can accept turns but it will not generate "
+        f"full tutoring replies until Gemini Live is configured. {setup_hint}"
+    )
 
 
 async def send_live_event(
@@ -464,6 +585,7 @@ async def live_websocket(websocket: WebSocket) -> None:
         "mode": settings.default_tutoring_mode,
         "target_text": None,
         "target_reference": None,
+        "target_translation": None,
         "preferred_response_language": "English",
         "pending_reference": None,
     }
@@ -474,6 +596,7 @@ async def live_websocket(websocket: WebSocket) -> None:
     tutor_memory_buffers: dict[str, str] = {}
     tutor_audio_turn_ids: set[str] = set()
     turn_first_output_watchdogs: dict[str, asyncio.Task[None]] = {}
+    local_audio_render_turn_ids: set[str] = set()
 
     gemini_connection: GeminiLiveConnection | None = None
     gemini_receive_task: asyncio.Task[None] | None = None
@@ -499,6 +622,7 @@ async def live_websocket(websocket: WebSocket) -> None:
         for watchdog in turn_first_output_watchdogs.values():
             watchdog.cancel()
         turn_first_output_watchdogs.clear()
+        local_audio_render_turn_ids.clear()
 
     def flush_tutor_memory(turn_id: str) -> None:
         buffered = tutor_memory_buffers.pop(turn_id, "")
@@ -517,6 +641,14 @@ async def live_websocket(websocket: WebSocket) -> None:
         learner_audio_memory_buffers.pop(turn_id, None)
 
     async def emit_local_tutor_reply(turn_id: str, text: str) -> None:
+        await emit_local_tutor_reply_with_options(turn_id, text=text, render_audio=False)
+
+    async def emit_local_tutor_reply_with_options(
+        turn_id: str,
+        *,
+        text: str,
+        render_audio: bool,
+    ) -> None:
         compact_text = _compact_text(text)
         if not compact_text:
             return
@@ -548,6 +680,233 @@ async def live_websocket(websocket: WebSocket) -> None:
                 detail="Backend satisfied this turn locally without an upstream generation.",
             )
         )
+        if render_audio:
+            await queue_local_reply_audio_render(turn_id, compact_text)
+
+    async def queue_local_reply_audio_render(turn_id: str, text: str) -> None:
+        if gemini_connection is None:
+            return
+
+        local_audio_render_turn_ids.add(turn_id)
+        state["active_generation_turn_id"] = turn_id
+        render_prompt = (
+            "[exact_audio_render]\n"
+            "Read the following tutor reply exactly as written.\n"
+            "Do not add, remove, translate, explain, or paraphrase anything.\n"
+            "Tutor reply:\n"
+            f"{text}"
+        )
+        try:
+            await gemini_connection.send_text(render_prompt)
+            await gemini_connection.end_turn()
+            arm_turn_first_output_watchdog(turn_id)
+        except Exception:
+            local_audio_render_turn_ids.discard(turn_id)
+            mark_turn_completed(turn_id)
+            logger.exception("Failed rendering local reply with Gemini native audio")
+            await emit(
+                build_server_error_event(
+                    "GEMINI_LOCAL_AUDIO_RENDER_FAILED",
+                    "Failed rendering a local reply with Gemini native audio.",
+                    retryable=True,
+                    session_id=state["session_id"],
+                    detail={"turn_id": turn_id},
+                )
+            )
+
+    async def run_local_reference_preflight(turn_id: str, learner_text: str) -> bool:
+        if not learner_text or not looks_like_reference_request(learner_text) or state["target_text"]:
+            return False
+
+        normalized_arguments = _normalize_preflight_tool_arguments(
+            "resolve_reference",
+            {
+                "reference": learner_text,
+                "preferred_translation_language": state["preferred_response_language"],
+            },
+            learner_text=learner_text,
+            target_text=state["target_text"],
+            preferred_response_language=state["preferred_response_language"],
+            mode=state["mode"],
+        )
+        tool_call_id = f"simple-ref-{turn_id}-{uuid4().hex[:8]}"
+        await emit(
+            ServerToolCallEvent(
+                session_id=state["session_id"],
+                turn_id=turn_id,
+                tool_call_id=tool_call_id,
+                tool_name="resolve_reference",
+                arguments=normalized_arguments,
+                status="started",
+            )
+        )
+        try:
+            result = execute_tool_call("resolve_reference", normalized_arguments)
+        except ToolExecutionError as exc:
+            failure_payload = {"status": "error", "message": str(exc)}
+            await emit(
+                ServerToolResultEvent(
+                    session_id=state["session_id"],
+                    turn_id=turn_id,
+                    tool_call_id=tool_call_id,
+                    tool_name="resolve_reference",
+                    status="failed",
+                    result=failure_payload,
+                    error="ORCHESTRATION_PREFLIGHT_FAILED",
+                )
+            )
+            failure_message = str(failure_payload.get("message", "")).strip()
+            await emit_local_tutor_reply(
+                turn_id,
+                failure_message
+                or (
+                    f"I could not resolve {state['pending_reference'] or learner_text} from the current corpus. "
+                    "Paste the Greek text or show it on camera, and I can work with it directly."
+                ),
+            )
+            return True
+
+        apply_tool_side_effects("resolve_reference", result)
+        await emit(
+            ServerToolResultEvent(
+                session_id=state["session_id"],
+                turn_id=turn_id,
+                tool_call_id=tool_call_id,
+                tool_name="resolve_reference",
+                status="completed",
+                result=result,
+            )
+        )
+        if result.get("status") != "ok":
+            failure_message = str(result.get("message", "")).strip()
+            await emit_local_tutor_reply(
+                turn_id,
+                failure_message
+                or (
+                    f"I could not resolve {state['pending_reference'] or learner_text} from the current corpus. "
+                    "Paste the Greek text or show it on camera, and I can work with it directly."
+                ),
+            )
+            return True
+
+        resolved_reference = str(
+            result.get("normalized_reference")
+            or result.get("reference")
+            or state["target_reference"]
+            or learner_text
+        ).strip()
+        await emit_local_tutor_reply(
+            turn_id,
+            (
+                f"I've loaded {resolved_reference}. "
+                "Would you like me to read it aloud, parse the first clause, or give a translation hint?"
+            ),
+        )
+        return True
+
+    async def run_local_loaded_passage_follow_up(turn_id: str, learner_text: str) -> bool:
+        if not learner_text or not state["target_text"]:
+            return False
+
+        wants_read = _is_read_request(learner_text)
+        wants_translation = _looks_like_translation_request(learner_text)
+        wants_analysis = _looks_like_analysis_request(learner_text)
+        if not any((wants_read, wants_translation, wants_analysis)):
+            return False
+
+        reference_label = state["target_reference"] or "the current passage"
+        target_text = _compact_text(str(state["target_text"] or ""))
+        target_translation = _compact_text(str(state["target_translation"] or ""))
+
+        if wants_analysis:
+            normalized_arguments = _normalize_preflight_tool_arguments(
+                "parse_passage",
+                {"text": target_text},
+                learner_text=learner_text,
+                target_text=target_text,
+                preferred_response_language=state["preferred_response_language"],
+                mode=state["mode"],
+            )
+            tool_call_id = f"simple-parse-{turn_id}-{uuid4().hex[:8]}"
+            await emit(
+                ServerToolCallEvent(
+                    session_id=state["session_id"],
+                    turn_id=turn_id,
+                    tool_call_id=tool_call_id,
+                    tool_name="parse_passage",
+                    arguments=normalized_arguments,
+                    status="started",
+                )
+            )
+            try:
+                result = execute_tool_call("parse_passage", normalized_arguments)
+            except ToolExecutionError as exc:
+                failure_payload = {"status": "error", "message": str(exc)}
+                await emit(
+                    ServerToolResultEvent(
+                        session_id=state["session_id"],
+                        turn_id=turn_id,
+                        tool_call_id=tool_call_id,
+                        tool_name="parse_passage",
+                        status="failed",
+                        result=failure_payload,
+                        error="LOCAL_PARSE_FAILED",
+                    )
+                )
+                await emit_local_tutor_reply(
+                    turn_id,
+                    (
+                        f"I could not run a local analysis for {reference_label}. "
+                        "Try asking about a specific word or send the verse again."
+                    ),
+                )
+                return True
+
+            await emit(
+                ServerToolResultEvent(
+                    session_id=state["session_id"],
+                    turn_id=turn_id,
+                    tool_call_id=tool_call_id,
+                    tool_name="parse_passage",
+                    status="completed",
+                    result=result,
+                )
+            )
+            await emit_local_tutor_reply_with_options(
+                turn_id,
+                text=_build_simple_parse_reply(reference_label=reference_label, parse_result=result),
+                render_audio=True,
+            )
+            return True
+
+        response_lines: list[str] = []
+        if wants_read:
+            response_lines.append(f"Read-aloud text: {target_text}")
+
+        if wants_translation:
+            if target_translation:
+                response_lines.append(f"Translation: {target_translation}")
+            else:
+                response_lines.append(
+                    f"I do not have a bundled full translation for {reference_label} in simple mode yet."
+                )
+                response_lines.append(
+                    "I can still give a quick analysis of the first clause or help you gloss it word by word."
+                )
+
+        if wants_read and not wants_translation:
+            response_lines.append("If you want, I can also give a translation hint or a quick analysis.")
+        elif wants_translation and not wants_read and target_translation:
+            response_lines.append("If you want, I can also show the Greek again or analyze the first clause.")
+        elif wants_read and wants_translation:
+            response_lines.append("If you want, I can also analyze the first clause.")
+
+        await emit_local_tutor_reply_with_options(
+            turn_id,
+            text="\n".join(response_lines),
+            render_audio=True,
+        )
+        return True
 
     def apply_tool_side_effects(tool_name: str, tool_result: dict[str, Any]) -> None:
         if tool_name != "resolve_reference" or tool_result.get("status") != "ok":
@@ -555,11 +914,18 @@ async def live_websocket(websocket: WebSocket) -> None:
 
         resolved_text = str(tool_result.get("resolved_text", "")).strip()
         normalized_reference = str(tool_result.get("normalized_reference", "")).strip()
+        translation_value = tool_result.get("translation")
+        translation = (
+            _compact_text(str(translation_value))
+            if isinstance(translation_value, str) and translation_value.strip()
+            else ""
+        )
         if not resolved_text:
             return
 
         state["target_text"] = resolved_text
         state["target_reference"] = normalized_reference or state["target_reference"]
+        state["target_translation"] = translation or None
         state["pending_reference"] = None
 
     def cancel_turn_first_output_watchdog(turn_id: str) -> None:
@@ -569,6 +935,7 @@ async def live_websocket(websocket: WebSocket) -> None:
 
     def mark_turn_completed(turn_id: str) -> None:
         cancel_turn_first_output_watchdog(turn_id)
+        local_audio_render_turn_ids.discard(turn_id)
         if state["active_generation_turn_id"] == turn_id:
             state["active_generation_turn_id"] = None
 
@@ -737,6 +1104,7 @@ async def live_websocket(websocket: WebSocket) -> None:
                 server_content = getattr(message, "server_content", None)
                 if server_content is not None:
                     turn_id = state["active_generation_turn_id"] or state["last_turn_id"]
+                    suppress_local_render_text = turn_id in local_audio_render_turn_ids
                     input_transcription = getattr(server_content, "input_transcription", None)
                     if input_transcription and getattr(input_transcription, "text", None):
                         learner_text = str(input_transcription.text)
@@ -763,24 +1131,25 @@ async def live_websocket(websocket: WebSocket) -> None:
                         output_text = str(output_transcription.text)
                         is_output_final = bool(getattr(output_transcription, "finished", False))
                         cancel_turn_first_output_watchdog(turn_id)
-                        await emit(
-                            ServerTranscriptEvent(
-                                session_id=state["session_id"] or "session-unknown",
-                                turn_id=turn_id,
-                                speaker="tutor",
-                                source="output_audio_transcription",
-                                text=output_text,
-                                is_final=is_output_final,
-                                interrupted=bool(getattr(server_content, "interrupted", False)),
+                        if not suppress_local_render_text:
+                            await emit(
+                                ServerTranscriptEvent(
+                                    session_id=state["session_id"] or "session-unknown",
+                                    turn_id=turn_id,
+                                    speaker="tutor",
+                                    source="output_audio_transcription",
+                                    text=output_text,
+                                    is_final=is_output_final,
+                                    interrupted=bool(getattr(server_content, "interrupted", False)),
+                                )
                             )
-                        )
-                        tutor_audio_turn_ids.add(turn_id)
-                        tutor_memory_buffers[turn_id] = _merge_streaming_text(
-                            tutor_memory_buffers.get(turn_id, ""),
-                            output_text,
-                        )
-                        if is_output_final:
-                            flush_tutor_memory(turn_id)
+                            tutor_audio_turn_ids.add(turn_id)
+                            tutor_memory_buffers[turn_id] = _merge_streaming_text(
+                                tutor_memory_buffers.get(turn_id, ""),
+                                output_text,
+                            )
+                            if is_output_final:
+                                flush_tutor_memory(turn_id)
 
                     model_turn = getattr(server_content, "model_turn", None)
                     if model_turn is not None:
@@ -793,32 +1162,33 @@ async def live_websocket(websocket: WebSocket) -> None:
                                     or getattr(server_content, "turn_complete", False)
                                 )
                                 cancel_turn_first_output_watchdog(turn_id)
-                                await emit(
-                                    ServerTextOutputEvent(
-                                        session_id=state["session_id"] or "session-unknown",
-                                        turn_id=turn_id,
-                                        text=tutor_text,
-                                        is_final=is_final,
+                                if not suppress_local_render_text:
+                                    await emit(
+                                        ServerTextOutputEvent(
+                                            session_id=state["session_id"] or "session-unknown",
+                                            turn_id=turn_id,
+                                            text=tutor_text,
+                                            is_final=is_final,
+                                        )
                                     )
-                                )
-                                await emit(
-                                    ServerTranscriptEvent(
-                                        session_id=state["session_id"] or "session-unknown",
-                                        turn_id=turn_id,
-                                        speaker="tutor",
-                                        source="output_text",
-                                        text=tutor_text,
-                                        is_final=is_final,
-                                        interrupted=bool(getattr(server_content, "interrupted", False)),
+                                    await emit(
+                                        ServerTranscriptEvent(
+                                            session_id=state["session_id"] or "session-unknown",
+                                            turn_id=turn_id,
+                                            speaker="tutor",
+                                            source="output_text",
+                                            text=tutor_text,
+                                            is_final=is_final,
+                                            interrupted=bool(getattr(server_content, "interrupted", False)),
+                                        )
                                     )
-                                )
-                                if turn_id not in tutor_audio_turn_ids:
-                                    tutor_memory_buffers[turn_id] = _merge_streaming_text(
-                                        tutor_memory_buffers.get(turn_id, ""),
-                                        tutor_text,
-                                    )
-                                    if is_final:
-                                        flush_tutor_memory(turn_id)
+                                    if turn_id not in tutor_audio_turn_ids:
+                                        tutor_memory_buffers[turn_id] = _merge_streaming_text(
+                                            tutor_memory_buffers.get(turn_id, ""),
+                                            tutor_text,
+                                        )
+                                        if is_final:
+                                            flush_tutor_memory(turn_id)
 
                             inline_data = getattr(part, "inline_data", None)
                             if inline_data and getattr(inline_data, "data", None):
@@ -1009,6 +1379,14 @@ async def live_websocket(websocket: WebSocket) -> None:
 
             if isinstance(event, ClientHelloEvent):
                 await close_gemini_connection()
+                session_api_key = None
+                if event.gemini_api_key:
+                    if settings.environment.lower() in {"development", "local", "test"}:
+                        session_api_key = event.gemini_api_key.strip() or None
+                    else:
+                        logger.warning(
+                            "Ignoring client-provided Gemini API key outside local development"
+                        )
                 state["session_id"] = event.session_id or f"session-{uuid4().hex[:10]}"
                 state["audio_chunk_index"] = 0
                 state["last_turn_id"] = "turn-initial"
@@ -1016,6 +1394,7 @@ async def live_websocket(websocket: WebSocket) -> None:
                 state["mode"] = event.mode or settings.default_tutoring_mode
                 state["target_text"] = event.target_text.strip() if event.target_text else None
                 state["target_reference"] = None
+                state["target_translation"] = None
                 state["preferred_response_language"] = (
                     event.preferred_response_language or "English"
                 )
@@ -1048,13 +1427,19 @@ async def live_websocket(websocket: WebSocket) -> None:
                     response_language=response_language,
                 )
                 tools = tool_registry.list_definitions()
+                simple_live_backend = _is_simple_live_backend()
 
                 try:
+                    connect_kwargs: dict[str, Any] = {
+                        "system_prompt": system_prompt,
+                        "tools": tools,
+                        "enable_tools": not simple_live_backend,
+                        "response_modalities": ["AUDIO"],
+                    }
+                    if session_api_key:
+                        connect_kwargs["api_key_override"] = session_api_key
                     gemini_connection = await asyncio.wait_for(
-                        gemini_gateway.connect_session(
-                            system_prompt=system_prompt,
-                            tools=tools,
-                        ),
+                        gemini_gateway.connect_session(**connect_kwargs),
                         timeout=settings.gemini_connect_timeout_seconds,
                     )
                 except Exception as exc:
@@ -1077,7 +1462,10 @@ async def live_websocket(websocket: WebSocket) -> None:
                     await emit(
                         ServerStatusEvent(
                             phase="listening",
-                            detail=f"Connected to Gemini Live model {settings.gemini_live_model}.",
+                            detail=(
+                                f"Connected to Gemini Live model {settings.gemini_live_model} "
+                                f"using the {settings.live_backend_profile} backend profile."
+                            ),
                             session_id=state["session_id"],
                             resumable=True,
                         )
@@ -1297,6 +1685,82 @@ async def live_websocket(websocket: WebSocket) -> None:
 
                 if learner_text and state["target_text"]:
                     state["pending_reference"] = None
+
+                if _is_simple_live_backend():
+                    await emit(
+                        ServerTurnEvent(
+                            session_id=state["session_id"],
+                            turn_id=event.turn_id,
+                            event="learner_turn_closed",
+                            detail=f"Learner turn ended because: {event.reason}.",
+                        )
+                    )
+
+                    if await run_local_reference_preflight(event.turn_id, learner_text):
+                        continue
+
+                    if await run_local_loaded_passage_follow_up(event.turn_id, learner_text):
+                        continue
+
+                    if gemini_connection is not None and turn_input.learner_text:
+                        mode_value = (
+                            state["mode"].value
+                            if hasattr(state["mode"], "value")
+                            else str(state["mode"])
+                        )
+                        learner_payload = _build_session_context_message(
+                            history=list(session_memory),
+                            mode=mode_value,
+                            target_reference=state["target_reference"],
+                            target_text=state["target_text"],
+                            preferred_response_language=state["preferred_response_language"],
+                            max_messages=settings.live_session_history_messages,
+                        )
+                        try:
+                            await gemini_connection.send_text(learner_payload)
+                        except Exception:
+                            logger.exception("Failed forwarding learner turn text to Gemini")
+                            await emit(
+                                build_server_error_event(
+                                    "GEMINI_SEND_TEXT_FAILED",
+                                    "Failed forwarding learner text to Gemini Live.",
+                                    retryable=True,
+                                    session_id=state["session_id"],
+                                    detail={"turn_id": event.turn_id},
+                                )
+                            )
+
+                    await emit(
+                        ServerStatusEvent(
+                            phase="thinking",
+                            detail="Simple backend: learner turn closed. Awaiting tutor generation.",
+                            session_id=state["session_id"],
+                            turn_id=event.turn_id,
+                        )
+                    )
+                    if gemini_connection is not None:
+                        state["active_generation_turn_id"] = event.turn_id
+                        try:
+                            if turn_input.audio_chunk_count > 0 and hasattr(gemini_connection, "end_audio_stream"):
+                                await gemini_connection.end_audio_stream()
+                            await gemini_connection.end_turn()
+                            arm_turn_first_output_watchdog(event.turn_id)
+                        except Exception:
+                            mark_turn_completed(event.turn_id)
+                            logger.exception("Failed signaling turn end to Gemini")
+                            await emit(
+                                build_server_error_event(
+                                    "GEMINI_TURN_END_FAILED",
+                                    "Failed signaling learner turn end to Gemini Live.",
+                                    retryable=True,
+                                    session_id=state["session_id"],
+                                    detail={"turn_id": event.turn_id},
+                                )
+                            )
+                    else:
+                        mark_turn_completed(event.turn_id)
+                    continue
+
                 plan = await turn_orchestrator.plan_turn(
                     mode=state["mode"],
                     target_text=state["target_text"],

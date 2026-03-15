@@ -96,6 +96,16 @@ _EMBEDDED_CANONICAL_XML: dict[str, str] = {
 """,
 }
 
+_EMBEDDED_PASSAGE_TRANSLATIONS: dict[str, str] = {
+    "mark 1:1": "The beginning of the gospel of Jesus Christ.",
+    "mark 1:2": "Just as it is written in Isaiah the prophet.",
+    "john 1:1": "In the beginning was the Word, and the Word was with God, and the Word was God.",
+    "john 1:2": "He was in the beginning with God.",
+    "iliad 1.1": "Sing, goddess, of the wrath of Achilles son of Peleus.",
+    "iliad 1.2": "The accursed wrath that brought countless sufferings upon the Achaeans.",
+    "iliad 1.3": "And sent many valiant souls of heroes down to Hades.",
+}
+
 
 @dataclass(frozen=True)
 class WorkMetadata:
@@ -221,7 +231,7 @@ def execute_resolve_reference_tool(arguments: dict[str, Any]) -> dict[str, Any]:
         "passage_kind": _passage_kind_for_citation(parsed.citation_kind),
         "resolved_text": extracted["resolved_text"],
         "greek_text": extracted["resolved_text"],
-        "translation": None,
+        "translation": _EMBEDDED_PASSAGE_TRANSLATIONS.get(normalized_reference.casefold()),
         "preferred_translation_language": preferred_translation_language,
         "citation_confidence": "high",
         "cts_urn": cts_urn,

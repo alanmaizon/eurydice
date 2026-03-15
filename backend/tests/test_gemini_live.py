@@ -1,6 +1,8 @@
 import asyncio
 
-from backend.app.live.gemini_live import GeminiLiveConnection
+from backend.app.live import gemini_live
+from backend.app.live.gemini_live import GeminiLiveConnection, GeminiLiveGateway
+from backend.app.settings import Settings
 
 
 class _DummyContextManager:
@@ -49,3 +51,21 @@ def test_send_audio_chunk_uses_audio_only_input() -> None:
     assert isinstance(blob, _DummyBlob)
     assert blob.data == b"\x00\x01"
     assert blob.mime_type == "audio/pcm;rate=16000"
+
+
+def test_sdk_status_surfaces_runtime_diagnostics(monkeypatch) -> None:
+    monkeypatch.setattr(
+        gemini_live,
+        "_google_genai_import_diagnostics",
+        lambda: {
+            "available": False,
+            "detail": "google-genai missing in /custom/python (Python 3.13.5)",
+        },
+    )
+
+    status = GeminiLiveGateway(Settings()).sdk_status()
+
+    assert status == {
+        "available": False,
+        "detail": "google-genai missing in /custom/python (Python 3.13.5)",
+    }

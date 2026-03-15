@@ -159,12 +159,28 @@ def _build_fake_messages() -> list[SimpleNamespace]:
     ]
 
 
+def _receive_turn_until_complete(websocket, turn_id: str, *, max_events: int = 10) -> list[dict]:
+    events: list[dict] = []
+    for _ in range(max_events):
+        event = websocket.receive_json()
+        events.append(event)
+        if (
+            event.get("type") == "server.turn"
+            and event.get("turn_id") == turn_id
+            and event.get("event") == "turn_complete"
+        ):
+            break
+    return events
+
+
 def test_live_bridge_maps_gemini_messages_to_contract(monkeypatch) -> None:
     fake_connection = FakeGeminiConnection(messages=_build_fake_messages())
 
-    async def fake_connect_session(*, system_prompt: str, tools):
+    async def fake_connect_session(*, system_prompt: str, tools, **kwargs):
         assert "Current tutoring mode:" in system_prompt
         assert any(tool.name == "parse_passage" for tool in tools)
+        assert kwargs["enable_tools"] is True
+        assert kwargs["response_modalities"] == ["AUDIO"]
         return fake_connection
 
     monkeypatch.setattr(live_main.gemini_gateway, "connect_session", fake_connect_session)
@@ -227,10 +243,60 @@ def test_live_bridge_maps_gemini_messages_to_contract(monkeypatch) -> None:
     assert fake_connection.closed is True
 
 
+def test_client_hello_can_forward_local_dev_gemini_api_key(monkeypatch) -> None:
+    fake_connection = FakeGeminiConnection(messages=[])
+    captured_api_key_override: str | None = None
+
+    async def fake_connect_session(
+        *,
+        system_prompt: str,
+        tools,
+        api_key_override: str | None = None,
+        **kwargs,
+    ):
+        nonlocal captured_api_key_override
+        assert "Current tutoring mode:" in system_prompt
+        assert any(tool.name == "parse_passage" for tool in tools)
+        captured_api_key_override = api_key_override
+        assert kwargs["enable_tools"] is True
+        assert kwargs["response_modalities"] == ["AUDIO"]
+        return fake_connection
+
+    monkeypatch.setattr(live_main.gemini_gateway, "connect_session", fake_connect_session)
+
+    client = TestClient(live_main.app)
+    with client.websocket_connect("/ws/live") as websocket:
+        websocket.receive_json()  # server.ready
+        websocket.send_json(
+            {
+                "type": "client.hello",
+                "protocol_version": "2026-03-15",
+                "session_id": "session-local-key-1",
+                "mode": "guided_reading",
+                "gemini_api_key": "local-dev-key",
+                "capabilities": {
+                    "audio_input": True,
+                    "audio_output": True,
+                    "image_input": True,
+                    "supports_barge_in": True,
+                },
+                "client_name": "pytest-client",
+            }
+        )
+
+        ready_status = websocket.receive_json()
+        listening_status = websocket.receive_json()
+
+    assert ready_status["type"] == "server.status"
+    assert listening_status["type"] == "server.status"
+    assert listening_status["phase"] == "listening"
+    assert captured_api_key_override == "local-dev-key"
+
+
 def test_live_turn_end_runs_orchestration_preflight(monkeypatch) -> None:
     fake_connection = FakeGeminiConnection(messages=[])
 
-    async def fake_connect_session(*, system_prompt: str, tools):
+    async def fake_connect_session(*, system_prompt: str, tools, **kwargs):
         assert "Current tutoring mode:" in system_prompt
         assert any(tool.name == "parse_passage" for tool in tools)
         return fake_connection
@@ -303,7 +369,7 @@ def test_live_turn_end_runs_orchestration_preflight(monkeypatch) -> None:
 def test_live_text_is_forwarded_once_per_closed_turn(monkeypatch) -> None:
     fake_connection = FakeGeminiConnection(messages=[])
 
-    async def fake_connect_session(*, system_prompt: str, tools):
+    async def fake_connect_session(*, system_prompt: str, tools, **kwargs):
         assert "Current tutoring mode:" in system_prompt
         assert any(tool.name == "parse_passage" for tool in tools)
         return fake_connection
@@ -382,10 +448,250 @@ def test_live_text_is_forwarded_once_per_closed_turn(monkeypatch) -> None:
     assert fake_connection.end_turn_count == 2
 
 
+def test_simple_profile_skips_orchestration_and_sends_text_only_context(monkeypatch) -> None:
+    fake_connection = FakeGeminiConnection(messages=[])
+
+    async def fake_connect_session(*, system_prompt: str, tools, **kwargs):
+        assert "Current tutoring mode:" in system_prompt
+        assert kwargs["enable_tools"] is False
+        assert kwargs["response_modalities"] == ["AUDIO"]
+        return fake_connection
+
+    monkeypatch.setattr(live_main.settings, "live_backend_profile", "simple")
+    monkeypatch.setattr(live_main.settings, "live_session_history_messages", 2)
+    monkeypatch.setattr(live_main.gemini_gateway, "connect_session", fake_connect_session)
+
+    client = TestClient(live_main.app)
+    with client.websocket_connect("/ws/live") as websocket:
+        websocket.receive_json()  # server.ready
+        websocket.send_json(
+            {
+                "type": "client.hello",
+                "protocol_version": "2026-03-15",
+                "session_id": "session-simple-1",
+                "mode": "guided_reading",
+                "capabilities": {
+                    "audio_input": True,
+                    "audio_output": True,
+                    "image_input": True,
+                    "supports_barge_in": True,
+                },
+                "client_name": "pytest-client",
+            }
+        )
+        websocket.receive_json()  # ready status
+        websocket.receive_json()  # listening status
+
+        for turn_id, text in (
+            ("turn-simple-1", "first question"),
+            ("turn-simple-2", "second question"),
+            ("turn-simple-3", "third question"),
+        ):
+            websocket.send_json(
+                {
+                    "type": "client.input.text",
+                    "protocol_version": "2026-03-15",
+                    "turn_id": turn_id,
+                    "text": text,
+                    "source": "typed",
+                    "is_final": True,
+                }
+            )
+            websocket.receive_json()  # learner transcript echo
+            websocket.send_json(
+                {
+                    "type": "client.turn.end",
+                    "protocol_version": "2026-03-15",
+                    "turn_id": turn_id,
+                    "reason": "done",
+                }
+            )
+            turn_events = [websocket.receive_json() for _ in range(2)]
+            assert [event["type"] for event in turn_events] == ["server.turn", "server.status"]
+
+    assert len(fake_connection.sent_texts) == 3
+    assert "[session_context]" in fake_connection.sent_texts[2]
+    assert "Learner: first question" not in fake_connection.sent_texts[2]
+    assert "Learner: second question" in fake_connection.sent_texts[2]
+    assert "Learner: third question" in fake_connection.sent_texts[2]
+    assert fake_connection.end_turn_count == 3
+
+
+def test_simple_profile_translate_follow_up_stays_local_after_reference_load(monkeypatch) -> None:
+    fake_connection = FakeGeminiConnection(messages=[])
+
+    async def fake_connect_session(*, system_prompt: str, tools, **kwargs):
+        assert "Current tutoring mode:" in system_prompt
+        assert kwargs["enable_tools"] is False
+        assert kwargs["response_modalities"] == ["AUDIO"]
+        return fake_connection
+
+    monkeypatch.setattr(live_main.settings, "live_backend_profile", "simple")
+    monkeypatch.setattr(live_main.gemini_gateway, "connect_session", fake_connect_session)
+
+    client = TestClient(live_main.app)
+    with client.websocket_connect("/ws/live") as websocket:
+        websocket.receive_json()  # server.ready
+        websocket.send_json(
+            {
+                "type": "client.hello",
+                "protocol_version": "2026-03-15",
+                "session_id": "session-simple-translate-1",
+                "mode": "guided_reading",
+                "capabilities": {
+                    "audio_input": True,
+                    "audio_output": True,
+                    "image_input": True,
+                    "supports_barge_in": True,
+                },
+                "client_name": "pytest-client",
+            }
+        )
+        websocket.receive_json()  # ready status
+        websocket.receive_json()  # listening status
+
+        websocket.send_json(
+            {
+                "type": "client.input.text",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-ref-1",
+                "text": "Mark 1:1",
+                "source": "typed",
+                "is_final": True,
+            }
+        )
+        websocket.receive_json()  # learner transcript echo
+        websocket.send_json(
+            {
+                "type": "client.turn.end",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-ref-1",
+                "reason": "done",
+            }
+        )
+        _receive_turn_until_complete(websocket, "turn-ref-1")
+
+        websocket.send_json(
+            {
+                "type": "client.input.text",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-translate-1",
+                "text": "translate",
+                "source": "typed",
+                "is_final": True,
+            }
+        )
+        websocket.receive_json()  # learner transcript echo
+        websocket.send_json(
+            {
+                "type": "client.turn.end",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-translate-1",
+                "reason": "done",
+            }
+        )
+        turn_events = _receive_turn_until_complete(websocket, "turn-translate-1")
+
+    reply = next(event for event in turn_events if event["type"] == "server.output.text")
+    assert "Translation: The beginning of the gospel of Jesus Christ." in reply["text"]
+    assert len(fake_connection.sent_texts) == 1
+    assert "[exact_audio_render]" in fake_connection.sent_texts[0]
+    assert "Translation: The beginning of the gospel of Jesus Christ." in fake_connection.sent_texts[0]
+    assert fake_connection.end_turn_count == 1
+
+
+def test_simple_profile_analysis_follow_up_stays_local_after_reference_load(monkeypatch) -> None:
+    fake_connection = FakeGeminiConnection(messages=[])
+
+    async def fake_connect_session(*, system_prompt: str, tools, **kwargs):
+        assert "Current tutoring mode:" in system_prompt
+        assert kwargs["enable_tools"] is False
+        assert kwargs["response_modalities"] == ["AUDIO"]
+        return fake_connection
+
+    monkeypatch.setattr(live_main.settings, "live_backend_profile", "simple")
+    monkeypatch.setattr(live_main.gemini_gateway, "connect_session", fake_connect_session)
+
+    client = TestClient(live_main.app)
+    with client.websocket_connect("/ws/live") as websocket:
+        websocket.receive_json()  # server.ready
+        websocket.send_json(
+            {
+                "type": "client.hello",
+                "protocol_version": "2026-03-15",
+                "session_id": "session-simple-analysis-1",
+                "mode": "guided_reading",
+                "capabilities": {
+                    "audio_input": True,
+                    "audio_output": True,
+                    "image_input": True,
+                    "supports_barge_in": True,
+                },
+                "client_name": "pytest-client",
+            }
+        )
+        websocket.receive_json()  # ready status
+        websocket.receive_json()  # listening status
+
+        websocket.send_json(
+            {
+                "type": "client.input.text",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-ref-2",
+                "text": "Mark 1:1",
+                "source": "typed",
+                "is_final": True,
+            }
+        )
+        websocket.receive_json()  # learner transcript echo
+        websocket.send_json(
+            {
+                "type": "client.turn.end",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-ref-2",
+                "reason": "done",
+            }
+        )
+        _receive_turn_until_complete(websocket, "turn-ref-2")
+
+        websocket.send_json(
+            {
+                "type": "client.input.text",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-analysis-1",
+                "text": "analysis",
+                "source": "typed",
+                "is_final": True,
+            }
+        )
+        websocket.receive_json()  # learner transcript echo
+        websocket.send_json(
+            {
+                "type": "client.turn.end",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-analysis-1",
+                "reason": "done",
+            }
+        )
+        turn_events = _receive_turn_until_complete(websocket, "turn-analysis-1")
+
+    tool_call = next(event for event in turn_events if event["type"] == "server.tool.call")
+    tool_result = next(event for event in turn_events if event["type"] == "server.tool.result")
+    reply = next(event for event in turn_events if event["type"] == "server.output.text")
+    assert tool_call["tool_name"] == "parse_passage"
+    assert tool_result["status"] == "completed"
+    assert "quick local analysis for mark 1:1" in reply["text"].lower()
+    assert "Focus word:" in reply["text"]
+    assert len(fake_connection.sent_texts) == 1
+    assert "[exact_audio_render]" in fake_connection.sent_texts[0]
+    assert "quick local analysis for mark 1:1" in fake_connection.sent_texts[0].lower()
+    assert fake_connection.end_turn_count == 1
+
+
 def test_live_audio_turn_flushes_audio_stream_before_generation(monkeypatch) -> None:
     fake_connection = FakeGeminiConnection(messages=[])
 
-    async def fake_connect_session(*, system_prompt: str, tools):
+    async def fake_connect_session(*, system_prompt: str, tools, **kwargs):
         assert "Current tutoring mode:" in system_prompt
         assert any(tool.name == "parse_passage" for tool in tools)
         return fake_connection
@@ -441,7 +747,7 @@ def test_live_audio_turn_flushes_audio_stream_before_generation(monkeypatch) -> 
 def test_reference_turn_loads_passage_into_session_context(monkeypatch) -> None:
     fake_connection = FakeGeminiConnection(messages=[])
 
-    async def fake_connect_session(*, system_prompt: str, tools):
+    async def fake_connect_session(*, system_prompt: str, tools, **kwargs):
         assert "Current tutoring mode:" in system_prompt
         assert any(tool.name == "resolve_reference" for tool in tools)
         return fake_connection
@@ -501,7 +807,7 @@ def test_reference_turn_loads_passage_into_session_context(monkeypatch) -> None:
 def test_unknown_reference_prompts_for_passage_text_instead_of_stalling(monkeypatch) -> None:
     fake_connection = FakeGeminiConnection(messages=[])
 
-    async def fake_connect_session(*, system_prompt: str, tools):
+    async def fake_connect_session(*, system_prompt: str, tools, **kwargs):
         assert "Current tutoring mode:" in system_prompt
         assert any(tool.name == "resolve_reference" for tool in tools)
         return fake_connection
@@ -585,7 +891,7 @@ def test_unknown_reference_prompts_for_passage_text_instead_of_stalling(monkeypa
 def test_general_passage_selection_request_stays_local_and_text_first(monkeypatch) -> None:
     fake_connection = FakeGeminiConnection(messages=[])
 
-    async def fake_connect_session(*, system_prompt: str, tools):
+    async def fake_connect_session(*, system_prompt: str, tools, **kwargs):
         assert "Current tutoring mode:" in system_prompt
         return fake_connection
 
@@ -645,7 +951,7 @@ def test_general_passage_selection_request_stays_local_and_text_first(monkeypatc
 def test_parse_preflight_uses_loaded_target_text_when_planner_arguments_are_generic(monkeypatch) -> None:
     fake_connection = FakeGeminiConnection(messages=[])
 
-    async def fake_connect_session(*, system_prompt: str, tools):
+    async def fake_connect_session(*, system_prompt: str, tools, **kwargs):
         assert "Current tutoring mode:" in system_prompt
         assert any(tool.name == "parse_passage" for tool in tools)
         return fake_connection
@@ -722,7 +1028,7 @@ def test_parse_preflight_uses_loaded_target_text_when_planner_arguments_are_gene
 def test_timeout_emits_turn_complete_event_for_ui_cleanup(monkeypatch) -> None:
     fake_connection = FakeGeminiConnection(messages=[])
 
-    async def fake_connect_session(*, system_prompt: str, tools):
+    async def fake_connect_session(*, system_prompt: str, tools, **kwargs):
         assert "Current tutoring mode:" in system_prompt
         return fake_connection
 

@@ -122,7 +122,19 @@ const BackendEventMessage = memo(
           <span>{`tool ${payload.tool_name} ${payload.status}`}</span>
         );
       case "server.error":
-        return <span>{`${payload.code}: ${payload.message}`}</span>;
+        const errorPayload = payload as {
+          code: string;
+          message: string;
+          detail?: { reason?: string };
+        };
+        return (
+          <span>
+            {`${errorPayload.code}: ${errorPayload.message}`}
+            {typeof errorPayload.detail?.reason === "string"
+              ? ` (${errorPayload.detail.reason})`
+              : ""}
+          </span>
+        );
       case "server.turn": {
         const turnPayload = payload as {
           detail?: string | null;
