@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 import backend.app.main as live_main
+from backend.app.agents.orchestration.contracts import TurnPlan
 
 
 class FakeGeminiConnection:
@@ -488,18 +489,13 @@ def test_reference_turn_loads_passage_into_session_context(monkeypatch) -> None:
             }
         )
 
-        _ = [websocket.receive_json() for _ in range(5)]
+        turn_events = [websocket.receive_json() for _ in range(7)]
 
-    assert fake_connection.end_turn_count == 1
-    assert any(
-        sent_text.startswith("[orchestration_context]") and "resolve_reference" in sent_text
-        for sent_text in fake_connection.sent_texts
-    )
-    session_context_message = next(
-        sent_text for sent_text in fake_connection.sent_texts if sent_text.startswith("[session_context]")
-    )
-    assert "Target passage reference: mark 1:1" in session_context_message
-    assert "Target passage text: Αρχη του ευαγγελιου Ιησου Χριστου υιου θεου." in session_context_message
+    first_text = next(event for event in turn_events if event["type"] == "server.output.text")
+    assert "I've loaded Mark 1:1." in first_text["text"]
+    assert "read it aloud" in first_text["text"]
+    assert fake_connection.end_turn_count == 0
+    assert fake_connection.sent_texts == []
 
 
 def test_unknown_reference_prompts_for_passage_text_instead_of_stalling(monkeypatch) -> None:
@@ -578,9 +574,152 @@ def test_unknown_reference_prompts_for_passage_text_instead_of_stalling(monkeypa
         follow_up_events = [websocket.receive_json() for _ in range(4)]
 
     first_text = next(event for event in local_reply_events if event["type"] == "server.output.text")
-    assert "could not resolve Mark 99:99" in first_text["text"]
+    assert "could not load mark 99:99" in first_text["text"].lower()
 
     second_text = next(event for event in follow_up_events if event["type"] == "server.output.text")
     assert "still do not have the text of Mark 99:99" in second_text["text"]
     assert fake_connection.end_turn_count == 0
     assert fake_connection.sent_texts == []
+
+
+def test_parse_preflight_uses_loaded_target_text_when_planner_arguments_are_generic(monkeypatch) -> None:
+    fake_connection = FakeGeminiConnection(messages=[])
+
+    async def fake_connect_session(*, system_prompt: str, tools):
+        assert "Current tutoring mode:" in system_prompt
+        assert any(tool.name == "parse_passage" for tool in tools)
+        return fake_connection
+
+    async def fake_plan_turn(*, mode, target_text, preferred_response_language, turn_input):
+        assert target_text == "εἰς τὴν ἔρημον"
+        return TurnPlan(
+            engine="google-adk",
+            stage="tool_preflight",
+            rationale="Stub planner selected parse_passage with generic text.",
+            preflight_tool_name="parse_passage",
+            preflight_tool_arguments={"text": "analysis"},
+        )
+
+    monkeypatch.setattr(live_main.gemini_gateway, "connect_session", fake_connect_session)
+    monkeypatch.setattr(live_main.turn_orchestrator, "plan_turn", fake_plan_turn)
+
+    client = TestClient(live_main.app)
+    with client.websocket_connect("/ws/live") as websocket:
+        websocket.receive_json()  # server.ready
+        websocket.send_json(
+            {
+                "type": "client.hello",
+                "protocol_version": "2026-03-15",
+                "session_id": "session-parse-normalize-1",
+                "mode": "guided_reading",
+                "target_text": "εἰς τὴν ἔρημον",
+                "capabilities": {
+                    "audio_input": True,
+                    "audio_output": True,
+                    "image_input": True,
+                    "supports_barge_in": True,
+                },
+                "client_name": "pytest-client",
+            }
+        )
+        websocket.receive_json()  # ready status
+        websocket.receive_json()  # listening status
+
+        websocket.send_json(
+            {
+                "type": "client.input.text",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-parse-normalize-1",
+                "text": "analysis",
+                "source": "typed",
+                "is_final": True,
+            }
+        )
+        websocket.receive_json()  # learner transcript echo
+        websocket.send_json(
+            {
+                "type": "client.turn.end",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-parse-normalize-1",
+                "reason": "done",
+            }
+        )
+
+        turn_events = [websocket.receive_json() for _ in range(5)]
+
+    tool_call = next(event for event in turn_events if event["type"] == "server.tool.call")
+    tool_result = next(event for event in turn_events if event["type"] == "server.tool.result")
+
+    assert tool_call["arguments"]["text"] == "εἰς τὴν ἔρημον"
+    assert tool_result["status"] == "completed"
+    assert tool_result["result"]["tool"] == "parse_passage"
+    assert fake_connection.end_turn_count == 1
+    assert any(
+        sent_text.startswith("[orchestration_context]") for sent_text in fake_connection.sent_texts
+    )
+
+
+def test_timeout_emits_turn_complete_event_for_ui_cleanup(monkeypatch) -> None:
+    fake_connection = FakeGeminiConnection(messages=[])
+
+    async def fake_connect_session(*, system_prompt: str, tools):
+        assert "Current tutoring mode:" in system_prompt
+        return fake_connection
+
+    monkeypatch.setattr(live_main.gemini_gateway, "connect_session", fake_connect_session)
+    monkeypatch.setattr(live_main, "_TURN_FIRST_OUTPUT_TIMEOUT_SECONDS", 0.01)
+
+    client = TestClient(live_main.app)
+    with client.websocket_connect("/ws/live") as websocket:
+        websocket.receive_json()  # server.ready
+        websocket.send_json(
+            {
+                "type": "client.hello",
+                "protocol_version": "2026-03-15",
+                "session_id": "session-timeout-1",
+                "mode": "guided_reading",
+                "capabilities": {
+                    "audio_input": True,
+                    "audio_output": True,
+                    "image_input": True,
+                    "supports_barge_in": True,
+                },
+                "client_name": "pytest-client",
+            }
+        )
+        websocket.receive_json()  # ready status
+        websocket.receive_json()  # listening status
+
+        websocket.send_json(
+            {
+                "type": "client.input.text",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-timeout-1",
+                "text": "hello there",
+                "source": "typed",
+                "is_final": True,
+            }
+        )
+        websocket.receive_json()  # learner transcript echo
+        websocket.send_json(
+            {
+                "type": "client.turn.end",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-timeout-1",
+                "reason": "done",
+            }
+        )
+
+        turn_events = [websocket.receive_json() for _ in range(5)]
+
+    timeout_error = next(event for event in turn_events if event["type"] == "server.error")
+    turn_complete = next(
+        event
+        for event in turn_events
+        if event["type"] == "server.turn" and event["event"] == "turn_complete"
+    )
+
+    assert timeout_error["code"] == "TURN_TIMEOUT"
+    assert timeout_error["detail"]["turn_id"] == "turn-timeout-1"
+    assert turn_complete["turn_id"] == "turn-timeout-1"
+    assert fake_connection.end_turn_count == 1

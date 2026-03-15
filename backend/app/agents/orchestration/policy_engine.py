@@ -29,7 +29,8 @@ class TurnPolicyEngine:
             )
 
         if context.mode == TutorMode.morphology_coach or any(
-            marker in lower_text for marker in ("parse", "morph", "ending", "case", "declension")
+            marker in lower_text
+            for marker in ("analysis", "analy", "parse", "morph", "ending", "case", "declension")
         ):
             return TurnPlan(
                 engine="heuristic-fallback",

@@ -83,3 +83,23 @@ def test_plan_turn_can_choose_direct_generation() -> None:
     )
     assert plan.stage == "direct_generation"
     assert plan.preflight_tool_name is None
+
+
+def test_plan_turn_selects_parse_for_analysis_request() -> None:
+    orchestrator = LiveTurnOrchestrator(Settings(use_google_adk=False))
+    plan = asyncio.run(
+        orchestrator.plan_turn(
+            mode=TutorMode.guided_reading,
+            target_text="εἰς τὴν ἔρημον",
+            preferred_response_language="English",
+            turn_input=LiveTurnInput(
+                turn_id="turn-analysis",
+                reason="done",
+                learner_text="analysis",
+                audio_chunk_count=0,
+                image_frame_count=0,
+            ),
+        )
+    )
+    assert plan.stage == "tool_preflight"
+    assert plan.preflight_tool_name == "parse_passage"

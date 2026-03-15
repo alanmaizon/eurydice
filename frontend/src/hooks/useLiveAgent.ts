@@ -200,6 +200,31 @@ export function useLiveAgent({ preferredResponseLanguage, session }: UseLiveAgen
     });
   }
 
+  function settleTutorTurn(turnId: string, options?: { markPendingTextFinal?: boolean }) {
+    if (activeTutorTurnIdRef.current === turnId) {
+      activeTutorTurnIdRef.current = null;
+    }
+    thinkingTurnsRef.current.delete(turnId);
+
+    const pendingText = pendingOutputTextByTurnRef.current.get(turnId);
+    if (
+      options?.markPendingTextFinal !== false &&
+      pendingText &&
+      !audioTranscriptTurnsRef.current.has(turnId)
+    ) {
+      upsertTutorTranscript({
+        turn_id: turnId,
+        source: "output_text",
+        text: pendingText,
+        is_final: true,
+      });
+    }
+
+    pendingOutputTextByTurnRef.current.delete(turnId);
+    audioTranscriptTurnsRef.current.delete(turnId);
+    streamedOutputTextTurnsRef.current.delete(turnId);
+  }
+
   function ensureAudioContext() {
     if (typeof window === "undefined") {
       return null;
@@ -424,27 +449,9 @@ export function useLiveAgent({ preferredResponseLanguage, session }: UseLiveAgen
             payload.event === "turn_complete" ||
             payload.event === "interrupted"
           ) {
-            if (activeTutorTurnIdRef.current === payload.turn_id) {
-              activeTutorTurnIdRef.current = null;
-            }
-            thinkingTurnsRef.current.delete(payload.turn_id);
-            const pendingText = pendingOutputTextByTurnRef.current.get(payload.turn_id);
-            if (
-              pendingText &&
-              !audioTranscriptTurnsRef.current.has(payload.turn_id) &&
-              !streamedOutputTextTurnsRef.current.has(payload.turn_id) &&
-              payload.event !== "interrupted"
-            ) {
-              upsertTutorTranscript({
-                turn_id: payload.turn_id,
-                source: "output_text",
-                text: pendingText,
-                is_final: true,
-              });
-            }
-            pendingOutputTextByTurnRef.current.delete(payload.turn_id);
-            audioTranscriptTurnsRef.current.delete(payload.turn_id);
-            streamedOutputTextTurnsRef.current.delete(payload.turn_id);
+            settleTutorTurn(payload.turn_id, {
+              markPendingTextFinal: payload.event !== "interrupted",
+            });
           }
           return;
         case "server.tool.call":
@@ -473,20 +480,29 @@ export function useLiveAgent({ preferredResponseLanguage, session }: UseLiveAgen
             setConnectionDetail(payload.message);
             const detailTurnId = payload.detail?.turn_id;
             const activeTurnId = payload.detail?.active_turn_id;
-            if (
-              typeof detailTurnId === "string" &&
-              activeTutorTurnIdRef.current === detailTurnId
-            ) {
-              activeTutorTurnIdRef.current = null;
-              thinkingTurnsRef.current.delete(detailTurnId);
+            const relatedTurnId =
+              typeof detailTurnId === "string"
+                ? detailTurnId
+                : typeof activeTurnId === "string"
+                  ? activeTurnId
+                  : activeTutorTurnIdRef.current;
+            if (typeof detailTurnId === "string") {
+              settleTutorTurn(detailTurnId);
             }
-            if (
-              typeof activeTurnId === "string" &&
-              activeTutorTurnIdRef.current === activeTurnId
-            ) {
-              activeTutorTurnIdRef.current = null;
-              thinkingTurnsRef.current.delete(activeTurnId);
+            if (typeof activeTurnId === "string" && activeTurnId !== detailTurnId) {
+              settleTutorTurn(activeTurnId);
             }
+            if (!detailTurnId && !activeTurnId && relatedTurnId) {
+              settleTutorTurn(relatedTurnId);
+            }
+            appendTranscriptEntry({
+              speaker: "system",
+              text: `Error: ${payload.message}`,
+              source: payload.code,
+              turnId: relatedTurnId ?? null,
+              isFinal: true,
+            });
+            return;
           } else {
             setConnectionError(payload.message);
             setConnectionState("error");

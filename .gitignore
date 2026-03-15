@@ -23,3 +23,8 @@ frontend/.env
 frontend/.env.local
 frontend/*.tsbuildinfo
 .firebase/
+
+sgml/*
+!sgml/xml/
+sgml/xml/*
+!sgml/xml/classics.xml

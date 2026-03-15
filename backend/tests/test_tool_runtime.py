@@ -25,7 +25,9 @@ def test_resolve_reference_tool_returns_passage_text() -> None:
     assert result["tool"] == "resolve_reference"
     assert result["status"] == "ok"
     assert result["normalized_reference"] == "mark 1:1"
-    assert "ευαγγελιου" in result["resolved_text"].lower()
+    assert result["source"] != "starter_corpus"
+    assert result["cts_urn"].endswith(":1.1")
+    assert "εὐαγγελίου" in result["resolved_text"]
 
 
 def test_resolve_reference_tool_returns_not_found_for_unknown_reference() -> None:
@@ -37,6 +39,7 @@ def test_resolve_reference_tool_returns_not_found_for_unknown_reference() -> Non
     )
     assert result["tool"] == "resolve_reference"
     assert result["status"] == "not_found"
+    assert result["work"] == "Mark"
 
 
 def test_grade_tool_scores_against_reference() -> None:

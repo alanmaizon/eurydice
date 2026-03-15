@@ -79,6 +79,48 @@ app.include_router(api_router)
 _SECONDS_DURATION_RE = re.compile(r"^(?P<seconds>\d+(?:\.\d+)?)s$")
 _MAX_SESSION_MESSAGE_CHARS = 1200
 _TURN_FIRST_OUTPUT_TIMEOUT_SECONDS = 18.0
+_ANALYSIS_REQUEST_MARKERS = (
+    "analysis",
+    "analy",
+    "parse",
+    "parsing",
+    "morph",
+    "morphology",
+    "ending",
+    "case",
+    "declension",
+    "syntax",
+)
+_FOCUS_WORD_STOPWORDS = {
+    "analysis",
+    "analyze",
+    "and",
+    "case",
+    "clause",
+    "declension",
+    "ending",
+    "explain",
+    "first",
+    "for",
+    "give",
+    "hint",
+    "it",
+    "look",
+    "morph",
+    "morphology",
+    "of",
+    "parse",
+    "please",
+    "read",
+    "show",
+    "syntax",
+    "that",
+    "the",
+    "this",
+    "translate",
+    "translation",
+    "word",
+}
 
 
 def _decode_base64_payload(payload: str, *, field_name: str) -> bytes:
@@ -145,6 +187,110 @@ def _is_read_request(text: str) -> bool:
             "could you read it",
         )
     )
+
+
+def _looks_like_analysis_request(text: str) -> bool:
+    normalized = _compact_text(text).lower()
+    return any(marker in normalized for marker in _ANALYSIS_REQUEST_MARKERS)
+
+
+def _extract_focus_word_hint(text: str) -> str | None:
+    if not text:
+        return None
+    candidates = re.findall(r"[0-9A-Za-z\u0370-\u03ff\u1f00-\u1fff]+", text)
+    for candidate in reversed(candidates):
+        normalized = _compact_text(candidate).lower()
+        if len(normalized) <= 1:
+            continue
+        if normalized in _FOCUS_WORD_STOPWORDS:
+            continue
+        return candidate
+    return None
+
+
+def _normalize_preflight_tool_arguments(
+    tool_name: str,
+    raw_arguments: dict[str, Any],
+    *,
+    learner_text: str,
+    target_text: str | None,
+    preferred_response_language: str,
+    mode: Any,
+) -> dict[str, Any]:
+    arguments = dict(raw_arguments)
+    compact_learner_text = _compact_text(learner_text)
+    compact_target_text = _compact_text(target_text or "")
+
+    if tool_name == "resolve_reference":
+        reference_value = arguments.get("reference")
+        reference = _compact_text(str(reference_value)) if reference_value is not None else ""
+        if not reference:
+            reference = compact_learner_text
+        if reference:
+            arguments["reference"] = reference
+        arguments.setdefault("preferred_translation_language", preferred_response_language)
+        return arguments
+
+    if tool_name == "parse_passage":
+        provided_text_value = arguments.get("text")
+        provided_text = (
+            _compact_text(str(provided_text_value)) if provided_text_value is not None else ""
+        )
+        if compact_target_text and (
+            not provided_text or provided_text.casefold() == compact_learner_text.casefold()
+        ):
+            arguments["text"] = compact_target_text
+        elif provided_text:
+            arguments["text"] = provided_text
+        elif compact_target_text:
+            arguments["text"] = compact_target_text
+        elif compact_learner_text:
+            arguments["text"] = compact_learner_text
+
+        focus_word_value = arguments.get("focus_word")
+        focus_word = _compact_text(str(focus_word_value)) if focus_word_value is not None else ""
+        if not focus_word:
+            inferred_focus = _extract_focus_word_hint(compact_learner_text)
+            if inferred_focus and inferred_focus.casefold() != compact_learner_text.casefold():
+                arguments["focus_word"] = inferred_focus
+        else:
+            arguments["focus_word"] = focus_word
+        return arguments
+
+    if tool_name == "grade_attempt":
+        learner_answer_value = arguments.get("learner_answer")
+        learner_answer = (
+            _compact_text(str(learner_answer_value)) if learner_answer_value is not None else ""
+        )
+        reference_answer_value = arguments.get("reference_answer")
+        reference_answer = (
+            _compact_text(str(reference_answer_value))
+            if reference_answer_value is not None
+            else ""
+        )
+        if not learner_answer and compact_learner_text:
+            arguments["learner_answer"] = compact_learner_text
+        elif learner_answer:
+            arguments["learner_answer"] = learner_answer
+        if not reference_answer and compact_target_text:
+            arguments["reference_answer"] = compact_target_text
+        elif reference_answer:
+            arguments["reference_answer"] = reference_answer
+        return arguments
+
+    if tool_name == "generate_drill":
+        mistake_summary_value = arguments.get("mistake_summary")
+        mistake_summary = (
+            _compact_text(str(mistake_summary_value)) if mistake_summary_value is not None else ""
+        )
+        if not mistake_summary:
+            arguments["mistake_summary"] = compact_learner_text or "Learner requested more practice."
+        else:
+            arguments["mistake_summary"] = mistake_summary
+        arguments.setdefault("mode", getattr(mode, "value", str(mode)))
+        return arguments
+
+    return arguments
 
 
 def _append_message(
@@ -376,8 +522,10 @@ async def live_websocket(websocket: WebSocket) -> None:
 
         async def watchdog() -> None:
             await asyncio.sleep(_TURN_FIRST_OUTPUT_TIMEOUT_SECONDS)
+            turn_first_output_watchdogs.pop(turn_id, None)
             if state["active_generation_turn_id"] != turn_id:
                 return
+            state["active_generation_turn_id"] = None
             await emit(
                 build_server_error_event(
                     "TURN_TIMEOUT",
@@ -390,7 +538,14 @@ async def live_websocket(websocket: WebSocket) -> None:
                     detail={"turn_id": turn_id},
                 )
             )
-            state["active_generation_turn_id"] = None
+            await emit(
+                ServerTurnEvent(
+                    session_id=state["session_id"] or "session-unknown",
+                    turn_id=turn_id,
+                    event="turn_complete",
+                    detail="Tutor turn closed after timing out while waiting for model output.",
+                )
+            )
             flush_tutor_memory(turn_id)
 
         turn_first_output_watchdogs[turn_id] = asyncio.create_task(watchdog())
@@ -1097,6 +1252,14 @@ async def live_websocket(websocket: WebSocket) -> None:
                 )
 
                 if plan.preflight_tool_name is not None:
+                    normalized_preflight_arguments = _normalize_preflight_tool_arguments(
+                        plan.preflight_tool_name,
+                        plan.preflight_tool_arguments,
+                        learner_text=learner_text,
+                        target_text=state["target_text"],
+                        preferred_response_language=state["preferred_response_language"],
+                        mode=state["mode"],
+                    )
                     orchestrator_tool_call_id = f"orch-{event.turn_id}-{uuid4().hex[:8]}"
                     await emit(
                         ServerToolCallEvent(
@@ -1104,14 +1267,14 @@ async def live_websocket(websocket: WebSocket) -> None:
                             turn_id=event.turn_id,
                             tool_call_id=orchestrator_tool_call_id,
                             tool_name=plan.preflight_tool_name,
-                            arguments=plan.preflight_tool_arguments,
+                            arguments=normalized_preflight_arguments,
                             status="started",
                         )
                     )
                     try:
                         preflight_result = execute_tool_call(
                             plan.preflight_tool_name,
-                            plan.preflight_tool_arguments,
+                            normalized_preflight_arguments,
                         )
                     except ToolExecutionError as exc:
                         failure_payload = {"status": "error", "message": str(exc)}
@@ -1131,14 +1294,25 @@ async def live_websocket(websocket: WebSocket) -> None:
                             and state["pending_reference"]
                             and not state["target_text"]
                         ):
+                            failure_message = str(failure_payload.get("message", "")).strip()
                             await emit_local_tutor_reply(
                                 event.turn_id,
-                                (
+                                failure_message
+                                or (
                                     f"I could not resolve {state['pending_reference']} from the current corpus. "
                                     "Paste the Greek text or show it on camera, and I can work with it directly."
                                 ),
                             )
                             continue
+                        await send_orchestration_context_to_gemini(
+                            turn_id=event.turn_id,
+                            tool_name=plan.preflight_tool_name,
+                            tool_result={
+                                **failure_payload,
+                                "orchestration_engine": plan.engine,
+                                "orchestration_stage": plan.stage,
+                            },
+                        )
                     else:
                         apply_tool_side_effects(plan.preflight_tool_name, preflight_result)
                         preflight_result_with_meta = {
@@ -1162,11 +1336,33 @@ async def live_websocket(websocket: WebSocket) -> None:
                             and state["pending_reference"]
                             and not state["target_text"]
                         ):
+                            failure_message = str(preflight_result.get("message", "")).strip()
+                            await emit_local_tutor_reply(
+                                event.turn_id,
+                                failure_message
+                                or (
+                                    f"I could not resolve {state['pending_reference']} from the current corpus. "
+                                    "Paste the Greek text or show it on camera, and I can work with it directly."
+                                ),
+                            )
+                            continue
+                        if (
+                            plan.preflight_tool_name == "resolve_reference"
+                            and preflight_result.get("status") == "ok"
+                            and learner_text
+                            and looks_like_reference_request(learner_text)
+                        ):
+                            resolved_reference = str(
+                                preflight_result.get("reference")
+                                or preflight_result.get("normalized_reference")
+                                or state["target_reference"]
+                                or learner_text
+                            ).strip()
                             await emit_local_tutor_reply(
                                 event.turn_id,
                                 (
-                                    f"I could not resolve {state['pending_reference']} from the current corpus. "
-                                    "Paste the Greek text or show it on camera, and I can work with it directly."
+                                    f"I've loaded {resolved_reference}. "
+                                    "Would you like me to read it aloud, parse the first clause, or give a translation hint?"
                                 ),
                             )
                             continue
