@@ -482,7 +482,7 @@ def _build_orchestration_context_payload(
     }
 
 
-def _build_scaffold_mode_reply(
+def _build_live_unavailable_reply(
     *,
     learner_text: str,
     target_reference: str | None,
@@ -493,7 +493,8 @@ def _build_scaffold_mode_reply(
     compact_learner_text = _compact_text(learner_text)
     reference_label = target_reference or "the current passage"
     setup_hint = (
-        "Set TUTOR_GEMINI_API_KEY and reconnect to enable full live tutor responses."
+        "Reconnect to restore full live tutor responses. If you are running locally, "
+        "make sure TUTOR_GEMINI_API_KEY is set before reconnecting."
     )
 
     if (
@@ -503,7 +504,8 @@ def _build_scaffold_mode_reply(
     ):
         return (
             f"I ran the local parse scaffold for {reference_label}. "
-            "The full tutor voice and guided explanation layer is still offline in this local session. "
+            "The Gemini Live tutor is currently unavailable in this session, so the full voice and "
+            "guided explanation layer is offline right now. "
             f"{setup_hint}"
         )
 
@@ -514,7 +516,7 @@ def _build_scaffold_mode_reply(
     ):
         return (
             "I ran the local grading scaffold for your latest attempt, but the live tutor response layer "
-            f"is offline in this session. {setup_hint}"
+            f"is currently unavailable in this session. {setup_hint}"
         )
 
     if (
@@ -523,27 +525,27 @@ def _build_scaffold_mode_reply(
         and preflight_result.get("status") == "ok"
     ):
         return (
-            "I generated the local drill scaffold, but the live tutor response layer is offline in this "
-            f"session. {setup_hint}"
+            "I generated the local drill scaffold, but the live tutor response layer is currently "
+            f"unavailable in this session. {setup_hint}"
         )
 
     if target_text:
         return (
             f"I received your turn about {reference_label}. "
-            "This local backend is running in scaffold mode, so it can accept turns and run lightweight "
-            f"tools, but it will not generate a full tutoring reply until Gemini Live is configured. {setup_hint}"
+            "The Gemini Live tutor is currently unavailable in this session, so I can accept turns and "
+            f"run lightweight tools, but I cannot generate a full tutoring reply right now. {setup_hint}"
         )
 
     if compact_learner_text:
         return (
             f'I received your turn: "{compact_learner_text}". '
-            "This local backend is running in scaffold mode, so it will not generate a full tutoring reply "
-            f"until Gemini Live is configured. {setup_hint}"
+            "The Gemini Live tutor is currently unavailable in this session, so I cannot generate a full "
+            f"tutoring reply right now. {setup_hint}"
         )
 
     return (
-        "This local backend is running in scaffold mode, so it can accept turns but it will not generate "
-        f"full tutoring replies until Gemini Live is configured. {setup_hint}"
+        "The Gemini Live tutor is currently unavailable in this session, so I can accept turns but I "
+        f"cannot generate full tutoring replies right now. {setup_hint}"
     )
 
 
@@ -604,25 +606,61 @@ async def live_websocket(websocket: WebSocket) -> None:
     async def emit(event: object) -> None:
         await send_live_event(websocket, event, send_lock=send_lock)
 
-    async def close_gemini_connection() -> None:
+    async def close_gemini_connection(*, skip_receive_task_cancel: bool = False) -> None:
         nonlocal gemini_connection, gemini_receive_task
 
+        current_task = asyncio.current_task()
         if gemini_receive_task is not None:
-            gemini_receive_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await gemini_receive_task
-            gemini_receive_task = None
+            if skip_receive_task_cancel and gemini_receive_task is current_task:
+                gemini_receive_task = None
+            else:
+                gemini_receive_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await gemini_receive_task
+                gemini_receive_task = None
 
-        if gemini_connection is not None:
+        connection_to_close = gemini_connection
+        gemini_connection = None
+        state["active_generation_turn_id"] = None
+        if connection_to_close is not None:
             try:
-                await gemini_connection.close()
-            finally:
-                gemini_connection = None
+                await connection_to_close.close()
+            except Exception:
+                logger.exception("Failed closing Gemini connection")
 
         for watchdog in turn_first_output_watchdogs.values():
             watchdog.cancel()
         turn_first_output_watchdogs.clear()
         local_audio_render_turn_ids.clear()
+
+    async def handle_gemini_connection_unavailable(
+        *,
+        code: str,
+        message: str,
+        detail: dict[str, Any] | None = None,
+        cleanup_active_turn: bool = False,
+    ) -> None:
+        active_turn_id = state["active_generation_turn_id"]
+        await close_gemini_connection(skip_receive_task_cancel=True)
+        await emit(
+            build_server_error_event(
+                code,
+                message,
+                retryable=True,
+                session_id=state["session_id"],
+                detail=detail,
+            )
+        )
+        if cleanup_active_turn and active_turn_id:
+            await emit(
+                ServerTurnEvent(
+                    session_id=state["session_id"] or "session-unknown",
+                    turn_id=active_turn_id,
+                    event="turn_complete",
+                    detail="Tutor turn closed because Gemini Live became unavailable.",
+                )
+            )
+            flush_tutor_memory(active_turn_id)
 
     def flush_tutor_memory(turn_id: str) -> None:
         buffered = tutor_memory_buffers.pop(turn_id, "")
@@ -702,16 +740,12 @@ async def live_websocket(websocket: WebSocket) -> None:
             arm_turn_first_output_watchdog(turn_id)
         except Exception:
             local_audio_render_turn_ids.discard(turn_id)
-            mark_turn_completed(turn_id)
             logger.exception("Failed rendering local reply with Gemini native audio")
-            await emit(
-                build_server_error_event(
-                    "GEMINI_LOCAL_AUDIO_RENDER_FAILED",
-                    "Failed rendering a local reply with Gemini native audio.",
-                    retryable=True,
-                    session_id=state["session_id"],
-                    detail={"turn_id": turn_id},
-                )
+            await handle_gemini_connection_unavailable(
+                code="GEMINI_LOCAL_AUDIO_RENDER_FAILED",
+                message="Failed rendering a local reply with Gemini native audio.",
+                detail={"turn_id": turn_id},
+                cleanup_active_turn=True,
             )
 
     async def run_local_reference_preflight(turn_id: str, learner_text: str) -> bool:
@@ -987,13 +1021,10 @@ async def live_websocket(websocket: WebSocket) -> None:
             )
         except Exception:
             logger.exception("Failed sending tool response to Gemini")
-            await emit(
-                build_server_error_event(
-                    "GEMINI_TOOL_RESPONSE_FAILED",
-                    "Failed sending tool response back to Gemini Live.",
-                    retryable=True,
-                    session_id=state["session_id"],
-                )
+            await handle_gemini_connection_unavailable(
+                code="GEMINI_TOOL_RESPONSE_FAILED",
+                message="Failed sending tool response back to Gemini Live.",
+                cleanup_active_turn=True,
             )
 
     async def send_orchestration_context_to_gemini(
@@ -1016,14 +1047,10 @@ async def live_websocket(websocket: WebSocket) -> None:
             )
         except Exception:
             logger.exception("Failed forwarding orchestration context to Gemini")
-            await emit(
-                build_server_error_event(
-                    "GEMINI_ORCHESTRATION_CONTEXT_FAILED",
-                    "Failed forwarding orchestration preflight context to Gemini Live.",
-                    retryable=True,
-                    session_id=state["session_id"],
-                    detail={"turn_id": turn_id, "tool_name": tool_name},
-                )
+            await handle_gemini_connection_unavailable(
+                code="GEMINI_ORCHESTRATION_CONTEXT_FAILED",
+                message="Failed forwarding orchestration preflight context to Gemini Live.",
+                detail={"turn_id": turn_id, "tool_name": tool_name},
             )
 
     async def handle_gemini_function_call(function_call: Any) -> None:
@@ -1316,13 +1343,17 @@ async def live_websocket(websocket: WebSocket) -> None:
             raise
         except Exception:
             logger.exception("Gemini receive loop failed")
-            await emit(
-                build_server_error_event(
-                    "GEMINI_RECEIVE_FAILED",
-                    "Gemini live receive loop failed.",
-                    retryable=True,
-                    session_id=state["session_id"],
-                )
+            await handle_gemini_connection_unavailable(
+                code="GEMINI_RECEIVE_FAILED",
+                message="Gemini live receive loop failed.",
+                cleanup_active_turn=True,
+            )
+        else:
+            logger.warning("Gemini live receive loop closed")
+            await handle_gemini_connection_unavailable(
+                code="GEMINI_SESSION_CLOSED",
+                message="Gemini Live session closed. Reconnect to continue the lesson.",
+                cleanup_active_turn=True,
             )
 
     await emit(
@@ -1552,14 +1583,10 @@ async def live_websocket(websocket: WebSocket) -> None:
                     )
                 except Exception:
                     logger.exception("Failed forwarding audio input to Gemini")
-                    await emit(
-                        build_server_error_event(
-                            "GEMINI_SEND_AUDIO_FAILED",
-                            "Failed forwarding learner audio to Gemini Live.",
-                            retryable=True,
-                            session_id=state["session_id"],
-                            detail={"turn_id": event.turn_id, "chunk_index": event.chunk_index},
-                        )
+                    await handle_gemini_connection_unavailable(
+                        code="GEMINI_SEND_AUDIO_FAILED",
+                        message="Failed forwarding learner audio to Gemini Live.",
+                        detail={"turn_id": event.turn_id, "chunk_index": event.chunk_index},
                     )
                 continue
 
@@ -1605,14 +1632,10 @@ async def live_websocket(websocket: WebSocket) -> None:
                     )
                 except Exception:
                     logger.exception("Failed forwarding image input to Gemini")
-                    await emit(
-                        build_server_error_event(
-                            "GEMINI_SEND_IMAGE_FAILED",
-                            "Failed forwarding image input to Gemini Live.",
-                            retryable=True,
-                            session_id=state["session_id"],
-                            detail={"turn_id": event.turn_id, "frame_index": event.frame_index},
-                        )
+                    await handle_gemini_connection_unavailable(
+                        code="GEMINI_SEND_IMAGE_FAILED",
+                        message="Failed forwarding image input to Gemini Live.",
+                        detail={"turn_id": event.turn_id, "frame_index": event.frame_index},
                     )
                 continue
 
@@ -1720,15 +1743,22 @@ async def live_websocket(websocket: WebSocket) -> None:
                             await gemini_connection.send_text(learner_payload)
                         except Exception:
                             logger.exception("Failed forwarding learner turn text to Gemini")
-                            await emit(
-                                build_server_error_event(
-                                    "GEMINI_SEND_TEXT_FAILED",
-                                    "Failed forwarding learner text to Gemini Live.",
-                                    retryable=True,
-                                    session_id=state["session_id"],
-                                    detail={"turn_id": event.turn_id},
-                                )
+                            await handle_gemini_connection_unavailable(
+                                code="GEMINI_SEND_TEXT_FAILED",
+                                message="Failed forwarding learner text to Gemini Live.",
+                                detail={"turn_id": event.turn_id},
                             )
+
+                    if gemini_connection is None:
+                        await emit_local_tutor_reply(
+                            event.turn_id,
+                            _build_live_unavailable_reply(
+                                learner_text=learner_text,
+                                target_reference=state["target_reference"],
+                                target_text=state["target_text"],
+                            ),
+                        )
+                        continue
 
                     await emit(
                         ServerStatusEvent(
@@ -1746,19 +1776,13 @@ async def live_websocket(websocket: WebSocket) -> None:
                             await gemini_connection.end_turn()
                             arm_turn_first_output_watchdog(event.turn_id)
                         except Exception:
-                            mark_turn_completed(event.turn_id)
                             logger.exception("Failed signaling turn end to Gemini")
-                            await emit(
-                                build_server_error_event(
-                                    "GEMINI_TURN_END_FAILED",
-                                    "Failed signaling learner turn end to Gemini Live.",
-                                    retryable=True,
-                                    session_id=state["session_id"],
-                                    detail={"turn_id": event.turn_id},
-                                )
+                            await handle_gemini_connection_unavailable(
+                                code="GEMINI_TURN_END_FAILED",
+                                message="Failed signaling learner turn end to Gemini Live.",
+                                detail={"turn_id": event.turn_id},
+                                cleanup_active_turn=True,
                             )
-                    else:
-                        mark_turn_completed(event.turn_id)
                     continue
 
                 plan = await turn_orchestrator.plan_turn(
@@ -1785,6 +1809,7 @@ async def live_websocket(websocket: WebSocket) -> None:
                     )
                 )
 
+                preflight_result_for_fallback: dict[str, Any] | None = None
                 if plan.preflight_tool_name is not None:
                     if (
                         plan.preflight_tool_name == "resolve_reference"
@@ -1857,6 +1882,7 @@ async def live_websocket(websocket: WebSocket) -> None:
                                 "orchestration_stage": plan.stage,
                             },
                         )
+                        preflight_result_for_fallback = failure_payload
                     else:
                         apply_tool_side_effects(plan.preflight_tool_name, preflight_result)
                         preflight_result_with_meta = {
@@ -1915,6 +1941,7 @@ async def live_websocket(websocket: WebSocket) -> None:
                             tool_name=plan.preflight_tool_name,
                             tool_result=preflight_result_with_meta,
                         )
+                        preflight_result_for_fallback = preflight_result_with_meta
 
                 if gemini_connection is not None and turn_input.learner_text:
                     mode_value = (
@@ -1933,15 +1960,24 @@ async def live_websocket(websocket: WebSocket) -> None:
                         await gemini_connection.send_text(learner_payload)
                     except Exception:
                         logger.exception("Failed forwarding learner turn text to Gemini")
-                        await emit(
-                            build_server_error_event(
-                                "GEMINI_SEND_TEXT_FAILED",
-                                "Failed forwarding learner text to Gemini Live.",
-                                retryable=True,
-                                session_id=state["session_id"],
-                                detail={"turn_id": event.turn_id},
-                            )
+                        await handle_gemini_connection_unavailable(
+                            code="GEMINI_SEND_TEXT_FAILED",
+                            message="Failed forwarding learner text to Gemini Live.",
+                            detail={"turn_id": event.turn_id},
                         )
+
+                if gemini_connection is None:
+                    await emit_local_tutor_reply(
+                        event.turn_id,
+                        _build_live_unavailable_reply(
+                            learner_text=learner_text,
+                            target_reference=state["target_reference"],
+                            target_text=state["target_text"],
+                            preflight_tool_name=plan.preflight_tool_name,
+                            preflight_result=preflight_result_for_fallback,
+                        ),
+                    )
+                    continue
 
                 await emit(
                     ServerStatusEvent(
@@ -1959,19 +1995,13 @@ async def live_websocket(websocket: WebSocket) -> None:
                         await gemini_connection.end_turn()
                         arm_turn_first_output_watchdog(event.turn_id)
                     except Exception:
-                        mark_turn_completed(event.turn_id)
                         logger.exception("Failed signaling turn end to Gemini")
-                        await emit(
-                            build_server_error_event(
-                                "GEMINI_TURN_END_FAILED",
-                                "Failed signaling learner turn end to Gemini Live.",
-                                retryable=True,
-                                session_id=state["session_id"],
-                                detail={"turn_id": event.turn_id},
-                            )
+                        await handle_gemini_connection_unavailable(
+                            code="GEMINI_TURN_END_FAILED",
+                            message="Failed signaling learner turn end to Gemini Live.",
+                            detail={"turn_id": event.turn_id},
+                            cleanup_active_turn=True,
                         )
-                else:
-                    mark_turn_completed(event.turn_id)
                 continue
 
             if isinstance(event, ClientInterruptEvent):
@@ -2005,13 +2035,9 @@ async def live_websocket(websocket: WebSocket) -> None:
                             await gemini_connection.end_turn()
                     except Exception:
                         logger.exception("Failed forwarding interrupt to Gemini")
-                        await emit(
-                            build_server_error_event(
-                                "GEMINI_INTERRUPT_FAILED",
-                                "Failed forwarding interrupt signal to Gemini Live.",
-                                retryable=True,
-                                session_id=state["session_id"],
-                            )
+                        await handle_gemini_connection_unavailable(
+                            code="GEMINI_INTERRUPT_FAILED",
+                            message="Failed forwarding interrupt signal to Gemini Live.",
                         )
                 continue
 

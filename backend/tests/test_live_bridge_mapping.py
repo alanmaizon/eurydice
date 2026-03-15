@@ -1,3 +1,4 @@
+import asyncio
 import base64
 from types import SimpleNamespace
 
@@ -8,8 +9,14 @@ from backend.app.agents.orchestration.contracts import TurnPlan
 
 
 class FakeGeminiConnection:
-    def __init__(self, messages: list[SimpleNamespace]) -> None:
+    def __init__(
+        self,
+        messages: list[SimpleNamespace],
+        *,
+        auto_close_when_messages_exhausted: bool = False,
+    ) -> None:
         self._messages = messages
+        self._auto_close_when_messages_exhausted = auto_close_when_messages_exhausted
         self.tool_responses: list[dict[str, object]] = []
         self.sent_texts: list[str] = []
         self.end_audio_stream_count = 0
@@ -19,6 +26,10 @@ class FakeGeminiConnection:
     async def receive(self):
         for message in self._messages:
             yield message
+        if self._auto_close_when_messages_exhausted:
+            return
+        while not self.closed:
+            await asyncio.sleep(3600)
 
     async def send_text(self, text: str) -> None:  # pragma: no cover - not used in this test
         self.sent_texts.append(text)
@@ -1011,7 +1022,7 @@ def test_parse_preflight_uses_loaded_target_text_when_planner_arguments_are_gene
             }
         )
 
-        turn_events = [websocket.receive_json() for _ in range(5)]
+        turn_events = [websocket.receive_json() for _ in range(6)]
 
     tool_call = next(event for event in turn_events if event["type"] == "server.tool.call")
     tool_result = next(event for event in turn_events if event["type"] == "server.tool.result")
@@ -1089,3 +1100,69 @@ def test_timeout_emits_turn_complete_event_for_ui_cleanup(monkeypatch) -> None:
     assert timeout_error["detail"]["turn_id"] == "turn-timeout-1"
     assert turn_complete["turn_id"] == "turn-timeout-1"
     assert fake_connection.end_turn_count == 1
+
+
+def test_closed_gemini_session_falls_back_locally_instead_of_timing_out(monkeypatch) -> None:
+    fake_connection = FakeGeminiConnection(messages=[], auto_close_when_messages_exhausted=True)
+
+    async def fake_connect_session(*, system_prompt: str, tools, **kwargs):
+        assert "Current tutoring mode:" in system_prompt
+        return fake_connection
+
+    monkeypatch.setattr(live_main.gemini_gateway, "connect_session", fake_connect_session)
+
+    client = TestClient(live_main.app)
+    with client.websocket_connect("/ws/live") as websocket:
+        websocket.receive_json()  # server.ready
+        websocket.send_json(
+            {
+                "type": "client.hello",
+                "protocol_version": "2026-03-15",
+                "session_id": "session-closed-1",
+                "mode": "guided_reading",
+                "capabilities": {
+                    "audio_input": True,
+                    "audio_output": True,
+                    "image_input": True,
+                    "supports_barge_in": True,
+                },
+                "client_name": "pytest-client",
+            }
+        )
+
+        hello_events = [websocket.receive_json() for _ in range(3)]
+        closed_error = next(event for event in hello_events if event["type"] == "server.error")
+        assert closed_error["code"] == "GEMINI_SESSION_CLOSED"
+
+        websocket.send_json(
+            {
+                "type": "client.input.text",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-closed-1",
+                "text": "next verse",
+                "source": "typed",
+                "is_final": True,
+            }
+        )
+        websocket.receive_json()  # learner transcript echo
+        websocket.send_json(
+            {
+                "type": "client.turn.end",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-closed-1",
+                "reason": "done",
+            }
+        )
+
+        turn_events = [websocket.receive_json() for _ in range(6)]
+
+    text_event = next(event for event in turn_events if event["type"] == "server.output.text")
+    turn_complete = next(
+        event
+        for event in turn_events
+        if event["type"] == "server.turn" and event["event"] == "turn_complete"
+    )
+
+    assert "currently unavailable" in text_event["text"]
+    assert "Reconnect to restore full live tutor responses" in text_event["text"]
+    assert turn_complete["turn_id"] == "turn-closed-1"
