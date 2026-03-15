@@ -582,6 +582,66 @@ def test_unknown_reference_prompts_for_passage_text_instead_of_stalling(monkeypa
     assert fake_connection.sent_texts == []
 
 
+def test_general_passage_selection_request_stays_local_and_text_first(monkeypatch) -> None:
+    fake_connection = FakeGeminiConnection(messages=[])
+
+    async def fake_connect_session(*, system_prompt: str, tools):
+        assert "Current tutoring mode:" in system_prompt
+        return fake_connection
+
+    monkeypatch.setattr(live_main.gemini_gateway, "connect_session", fake_connect_session)
+
+    client = TestClient(live_main.app)
+    with client.websocket_connect("/ws/live") as websocket:
+        websocket.receive_json()  # server.ready
+        websocket.send_json(
+            {
+                "type": "client.hello",
+                "protocol_version": "2026-03-15",
+                "session_id": "session-general-request-1",
+                "mode": "guided_reading",
+                "capabilities": {
+                    "audio_input": True,
+                    "audio_output": True,
+                    "image_input": True,
+                    "supports_barge_in": True,
+                },
+                "client_name": "pytest-client",
+            }
+        )
+        websocket.receive_json()  # ready status
+        websocket.receive_json()  # listening status
+
+        websocket.send_json(
+            {
+                "type": "client.input.text",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-general-request-1",
+                "text": "can we study one chapter of the gospel of john?",
+                "source": "typed",
+                "is_final": True,
+            }
+        )
+        websocket.receive_json()  # learner transcript echo
+        websocket.send_json(
+            {
+                "type": "client.turn.end",
+                "protocol_version": "2026-03-15",
+                "turn_id": "turn-general-request-1",
+                "reason": "done",
+            }
+        )
+
+        turn_events = [websocket.receive_json() for _ in range(4)]
+
+    reply = next(event for event in turn_events if event["type"] == "server.output.text")
+    assert "study one verse from John" in reply["text"]
+    assert "John 1:1" in reply["text"]
+    assert fake_connection.end_turn_count == 0
+    assert fake_connection.sent_texts == []
+    assert all(event["type"] != "server.tool.call" for event in turn_events)
+
+
 def test_parse_preflight_uses_loaded_target_text_when_planner_arguments_are_generic(monkeypatch) -> None:
     fake_connection = FakeGeminiConnection(messages=[])
 

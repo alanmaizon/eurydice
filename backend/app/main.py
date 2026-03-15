@@ -189,6 +189,61 @@ def _is_read_request(text: str) -> bool:
     )
 
 
+def _is_general_passage_selection_request(text: str) -> bool:
+    normalized = _compact_text(text).lower()
+    if not normalized or looks_like_reference_request(normalized):
+        return False
+
+    mentions_scope = any(word in normalized for word in ("verse", "chapter", "passage"))
+    mentions_study_intent = any(
+        phrase in normalized
+        for phrase in (
+            "study",
+            "read",
+            "work on",
+            "go through",
+            "look at",
+            "just lets",
+            "let's",
+        )
+    )
+    mentions_known_work = any(
+        phrase in normalized
+        for phrase in (
+            "gospel of john",
+            "john",
+            "mark",
+            "matthew",
+            "luke",
+            "homer",
+            "iliad",
+            "odyssey",
+        )
+    )
+    return (mentions_scope and mentions_study_intent) or (mentions_scope and mentions_known_work)
+
+
+def _build_general_passage_selection_reply(text: str) -> str:
+    normalized = _compact_text(text).lower()
+    if "john" in normalized:
+        return (
+            "Yes. Let's keep it text-first and study one verse from John. "
+            "Send a specific reference like John 1:1, or paste the Greek verse text, "
+            "and I'll guide you line by line."
+        )
+    if "mark" in normalized:
+        return (
+            "Yes. Let's keep it text-first and study one verse from Mark. "
+            "Send a specific reference like Mark 1:1, or paste the Greek verse text, "
+            "and I'll guide you line by line."
+        )
+    return (
+        "Yes. Let's do one short verse at a time. "
+        "Send a specific reference like John 1:1, or paste the Greek passage text, "
+        "and I'll guide the reading step by step."
+    )
+
+
 def _looks_like_analysis_request(text: str) -> bool:
     normalized = _compact_text(text).lower()
     return any(marker in normalized for marker in _ANALYSIS_REQUEST_MARKERS)
@@ -1225,6 +1280,21 @@ async def live_websocket(websocket: WebSocket) -> None:
                     )
                     continue
 
+                if learner_text and not state["target_text"] and _is_general_passage_selection_request(learner_text):
+                    await emit(
+                        ServerTurnEvent(
+                            session_id=state["session_id"],
+                            turn_id=event.turn_id,
+                            event="learner_turn_closed",
+                            detail=f"Learner turn ended because: {event.reason}.",
+                        )
+                    )
+                    await emit_local_tutor_reply(
+                        event.turn_id,
+                        _build_general_passage_selection_reply(learner_text),
+                    )
+                    continue
+
                 if learner_text and state["target_text"]:
                     state["pending_reference"] = None
                 plan = await turn_orchestrator.plan_turn(
@@ -1252,6 +1322,16 @@ async def live_websocket(websocket: WebSocket) -> None:
                 )
 
                 if plan.preflight_tool_name is not None:
+                    if (
+                        plan.preflight_tool_name == "resolve_reference"
+                        and learner_text
+                        and not looks_like_reference_request(learner_text)
+                    ):
+                        await emit_local_tutor_reply(
+                            event.turn_id,
+                            _build_general_passage_selection_reply(learner_text),
+                        )
+                        continue
                     normalized_preflight_arguments = _normalize_preflight_tool_arguments(
                         plan.preflight_tool_name,
                         plan.preflight_tool_arguments,
