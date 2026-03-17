@@ -1,0 +1,139 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Google Fonts ─────────────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ── CSS Variable Palette ─────────────────────────────────────────────────── */
+:root {
+  --bg: #ffffff;
+  --surface: #f8f9fa;
+  --surface-hover: #f1f3f4;
+  --border: #dadce0;
+  --border-subtle: #e8eaed;
+  --text-primary: #1f1f1f;
+  --text-secondary: #5f6368;
+  --text-muted: #9aa0a6;
+  --accent: #b8860b;
+  --accent-fg: #ffffff;
+  --accent-hover: #9a6f08;
+  --live: #34a853;
+  --error: #ea4335;
+  --error-surface: #fce8e6;
+  --composer: #f1f3f4;
+  --composer-border: #dadce0;
+
+  --radius: 12px;
+  --radius-sm: 8px;
+
+  font-family: "DM Sans", "Outfit", sans-serif;
+}
+
+.dark {
+  --bg: #0c0c0e;
+  --surface: #1a1a1c;
+  --surface-hover: #242428;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --text-primary: #e8e0d0;
+  --text-secondary: #9aa0a6;
+  --text-muted: #5f6368;
+  --accent: #c8a84e;
+  --accent-fg: #0c0c0e;
+  --accent-hover: #d4b86a;
+  --live: #4caf6b;
+  --error: #c45050;
+  --error-surface: #2c1515;
+  --composer: #161618;
+  --composer-border: rgba(255, 255, 255, 0.08);
+}
+
+/* ── Base ─────────────────────────────────────────────────────────────────── */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  background-color: var(--bg);
+  color: var(--text-primary);
+  font-family: "DM Sans", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Hide scrollbars unless actively scrolling */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+/* ── Greek text ───────────────────────────────────────────────────────────── */
+.greek {
+  font-family: "EB Garamond", "Cormorant Garamond", serif;
+  font-size: 1.05em;
+}
+
+/* ── Streaming cursor ─────────────────────────────────────────────────────── */
+.streaming-cursor::after {
+  content: "▋";
+  animation: stream-cursor 1s step-end infinite;
+  color: var(--accent);
+  font-size: 0.8em;
+}
+
+/* ── Status dot animations ────────────────────────────────────────────────── */
+.status-dot-live {
+  animation: pulse-dot 1.4s ease-in-out infinite;
+  background-color: var(--live);
+}
+
+/* ── Prose-style transcript ───────────────────────────────────────────────── */
+.transcript-prose p {
+  margin-bottom: 0.5rem;
+}
+.transcript-prose strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* ── Inspector monospace ──────────────────────────────────────────────────── */
+.inspector-mono {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* ── Keyframes ────────────────────────────────────────────────────────────── */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.4; transform: scale(0.85); }
+}
+
+@keyframes stream-cursor {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+.animate-fade-in  { animation: fade-in  0.2s ease-out; }
+.animate-slide-in { animation: slide-in 0.25s ease-out; }

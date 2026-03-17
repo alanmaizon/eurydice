@@ -1,0 +1,11 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - $_IMAGE
+      - --build-arg
+      - NEXT_PUBLIC_WS_URL=$_WS_URL
+      - .
+images:
+  - $_IMAGE

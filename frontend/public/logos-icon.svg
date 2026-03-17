@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Greek lambda Λ as icon -->
+  <circle cx="32" cy="32" r="30" fill="#B8860B" opacity="0.12"/>
+  <circle cx="32" cy="32" r="30" stroke="#B8860B" stroke-width="1.5"/>
+  <!-- Λ shape -->
+  <path d="M 14 50 L 32 16 L 50 50" stroke="#B8860B" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M 21 38 L 43 38" stroke="#B8860B" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+</svg>
