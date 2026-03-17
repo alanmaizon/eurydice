@@ -8,7 +8,11 @@
       "Bash(python -c \"import ast, sys:*)",
       "Skill(update-config)",
       "Skill(update-config:*)",
-      "Read(//Users/alanmaizon/.claude/**)"
+      "Read(//Users/alanmaizon/.claude/**)",
+      "Bash(pip install:*)",
+      "Bash(pip index:*)",
+      "Bash(python3 -c \"import sys; print\\(sys.executable, sys.version\\)\")",
+      "Bash(pip show:*)"
     ]
   },
   "hooks": {

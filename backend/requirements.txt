@@ -7,3 +7,10 @@ anthropic>=0.40.0
 pydantic==2.9.2
 pydantic-settings==2.5.2
 pytest>=8.0.0
+# Audio analysis
+librosa>=0.10.0
+soundfile>=0.12.0
+# basic-pitch>=0.3.0  # requires Python <=3.11 + tensorflow-macos; install manually if available
+# Vision analysis
+mediapipe>=0.10.0
+Pillow>=10.0.0

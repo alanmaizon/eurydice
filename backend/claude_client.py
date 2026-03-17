@@ -27,7 +27,12 @@ from models import (
     ErrorMessage,
     LogMessage,
 )
-from tools import EURYDICE_TOOL_DECLARATIONS, execute_eurydice_tool_mock
+from config import USE_MOCK
+from tools import (
+    EURYDICE_TOOL_DECLARATIONS,
+    execute_eurydice_tool_mock,
+    execute_eurydice_tool_live,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +163,11 @@ async def run_claude_session(websocket: Any, config: dict[str, Any]) -> None:
                     timestamp=now(),
                 ))
 
-                result = execute_eurydice_tool_mock(tool_name, args)
+                result = (
+                    execute_eurydice_tool_mock(tool_name, args)
+                    if USE_MOCK
+                    else execute_eurydice_tool_live(tool_name, args)
+                )
 
                 await send(ToolResultMessage(call_id=call_id, result=result))
                 await send(LogMessage(

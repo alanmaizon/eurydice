@@ -353,6 +353,27 @@ def execute_eurydice_tool_mock(tool_name: str, args: dict[str, Any]) -> Any:
     return {"error": f"Unknown Eurydice tool: {tool_name}"}
 
 
+def execute_eurydice_tool_live(tool_name: str, args: dict[str, Any]) -> Any:
+    """
+    Execute Eurydice tool calls against real analysis pipelines.
+    Falls back to mock results if a pipeline dependency is missing or fails.
+    """
+    try:
+        if tool_name == "audio_analysis":
+            from audio_pipeline import analyze_audio
+            return analyze_audio(args)
+        if tool_name == "vision_analysis":
+            from vision_pipeline import analyze_vision
+            return analyze_vision(args)
+    except Exception as exc:
+        import traceback as tb
+        tb.print_exc()
+        result = execute_eurydice_tool_mock(tool_name, args)
+        result["_error"] = str(exc)
+        return result
+    return {"error": f"Unknown Eurydice tool: {tool_name}"}
+
+
 # ── Logos mock results (unchanged below) ─────────────────────────────────────
 
 def execute_tool_mock(tool_name: str, args: dict[str, Any]) -> Any:
