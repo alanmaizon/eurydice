@@ -5,7 +5,23 @@
       "Skill(claude-api:*)",
       "Bash(python -c \"import anthropic; print\\(anthropic.__version__\\)\")",
       "Bash(python -c \":*)",
-      "Bash(python -c \"import ast, sys:*)"
+      "Bash(python -c \"import ast, sys:*)",
+      "Skill(update-config)",
+      "Skill(update-config:*)",
+      "Read(//Users/alanmaizon/.claude/**)"
+    ]
+  },
+  "hooks": {
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"\nimport json, sys\ndata = json.load(sys.stdin)\nsummary = data.get('summary', '')\nif summary:\n    footer = '\\n\\nContinue the conversation from where it left off without asking the user any further questions. Resume directly \\u2014 do not acknowledge the summary, do not recap what was happening, do not preface with \\\"I will continue\\\" or similar. Pick up the last task as if the break never happened.\\n'\n    open('/Users/alanmaizon/eurydice/CONTEXT.md', 'w').write('# CONTEXT.md\\n\\n' + summary + footer)\n\" 2>/dev/null || true",
+            "statusMessage": "Updating CONTEXT.md..."
+          }
+        ]
+      }
     ]
   }
 }
