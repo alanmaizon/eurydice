@@ -22,6 +22,22 @@ async def health() -> dict:
     return {"status": "ok", "mock_mode": USE_MOCK}
 
 
+@app.get("/metrics")
+async def metrics() -> dict:
+    from telemetry import get_collector
+    c = get_collector()
+    return {
+        "product": c.compute_product_metrics(),
+        "tool_quality": c.compute_tool_quality_metrics(),
+    }
+
+
+@app.get("/metrics/session/{session_id}")
+async def session_metrics(session_id: str) -> dict:
+    from telemetry import get_collector
+    return get_collector().compute_session_metrics(session_id)
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()

@@ -11,6 +11,7 @@ Session protocol matches gemini_client.py — same WebSocket message types.
 import asyncio
 import json
 import logging
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -35,8 +36,11 @@ from models import (
     StateChangedMessage,
     MasteryUpdateMessage,
     MasteryAchievedMessage,
+    TargetValidationMessage,
+    CaptureInvalidMessage,
 )
 from config import USE_MOCK
+from telemetry import get_collector
 from tools import (
     EURYDICE_TOOL_DECLARATIONS,
     execute_eurydice_tool_mock,
@@ -76,6 +80,7 @@ async def run_claude_session(websocket: Any, config: dict[str, Any]) -> None:
 
     # Session state machine
     sess: EurydiceSession = create_session(session_id)
+    collector = get_collector()
 
     # Conversation history (stateful across turns in this session)
     messages: list[dict[str, Any]] = []
@@ -103,6 +108,7 @@ async def run_claude_session(websocket: Any, config: dict[str, Any]) -> None:
         data={"session_id": session_id},
         timestamp=now(),
     ))
+    await collector.record("session.start", session_id, {"timestamp": time.time()})
 
     # ── Per-turn tool-use loop ─────────────────────────────────────────────────
 
@@ -207,32 +213,79 @@ async def run_claude_session(websocket: Any, config: dict[str, Any]) -> None:
                     else execute_eurydice_tool_live(tool_name, args)
                 )
 
-                # Post-process audio_analysis: run mastery gate + emit updates
+                # Post-process audio_analysis: confidence gate + mastery gate
                 if tool_name == "audio_analysis" and "performance_scores" in result:
-                    mastery_check = sess.record_attempt(result)
-                    result["_mastery"] = mastery_check.to_dict()
+                    # Track first feedback time
+                    if sess.first_feedback_at is None:
+                        sess.first_feedback_at = time.time()
 
-                    await send(MasteryUpdateMessage(
-                        consecutive_passes=mastery_check.consecutive_passes,
-                        passes_needed=mastery_check.passes_needed,
-                        mastered=mastery_check.mastered,
-                        gate_detail=mastery_check.gate_detail,
-                        attempt_number=mastery_check.attempt.attempt_number,
-                    ))
+                    analysis_confidence = float(result.get("analysis_confidence", 0.0))
+                    capture_quality = result.get("capture_quality", {})
 
-                    if mastery_check.mastered:
-                        await send(MasteryAchievedMessage(
-                            total_attempts=len(sess.mastery_gate.attempts),
-                            passage_description=sess.target.description or None,
-                        ))
-                        await emit_state()
-                    else:
+                    # Telemetry: feedback delivery timing
+                    await collector.record("feedback_delivered", session_id, {
+                        "time_to_first_feedback_ms": round(
+                            (sess.first_feedback_at - sess.created_at) * 1000, 1
+                        ) if sess.first_feedback_at else None,
+                        "mode": mode,
+                    })
+
+                    if analysis_confidence < sess.mastery_gate.confidence_gate:
+                        # Confidence too low → CAPTURE_INVALID
                         prev_state = sess.state
-                        sess.transition(
-                            SessionState.FEEDBACK_DEEP if mode == "deep"
-                            else SessionState.FEEDBACK_QUICK
-                        )
+                        sess.transition(SessionState.CAPTURE_INVALID)
                         await emit_state(prev_state)
+                        await send(CaptureInvalidMessage(
+                            analysis_confidence=analysis_confidence,
+                            capture_quality=capture_quality.get("overall", "unknown") if isinstance(capture_quality, dict) else "unknown",
+                            reasons=result.get("warnings", []),
+                        ))
+                        await collector.record("capture_failure", session_id, {
+                            "analysis_confidence": analysis_confidence,
+                            "capture_quality": capture_quality.get("overall", "unknown") if isinstance(capture_quality, dict) else "unknown",
+                            "reasons": result.get("warnings", []),
+                        })
+                    else:
+                        mastery_check = sess.record_attempt(result)
+                        result["_mastery"] = mastery_check.to_dict()
+                        scores = result.get("performance_scores", {})
+
+                        await collector.record("attempt", session_id, {
+                            "attempt_number": mastery_check.attempt.attempt_number,
+                            "timing_score": scores.get("timing", 0),
+                            "notes_score": scores.get("notes", 0),
+                            "overall_score": scores.get("overall", 0),
+                            "analysis_confidence": analysis_confidence,
+                            "passed": mastery_check.passed_this_attempt,
+                            "mode": mode,
+                        })
+
+                        await send(MasteryUpdateMessage(
+                            consecutive_passes=mastery_check.consecutive_passes,
+                            passes_needed=mastery_check.passes_needed,
+                            mastered=mastery_check.mastered,
+                            gate_detail=mastery_check.gate_detail,
+                            attempt_number=mastery_check.attempt.attempt_number,
+                        ))
+
+                        if mastery_check.mastered:
+                            await send(MasteryAchievedMessage(
+                                total_attempts=len(sess.mastery_gate.attempts),
+                                passage_description=sess.target.description or None,
+                            ))
+                            await emit_state()
+                            await collector.record("mastery", session_id, {
+                                "total_attempts": len(sess.mastery_gate.attempts),
+                                "time_to_mastery_s": round(time.time() - sess.created_at, 1),
+                                "passage_description": sess.target.description or "",
+                            })
+                        else:
+                            prev_state = sess.state
+                            sess.transition(
+                                SessionState.FEEDBACK_DEEP if mode == "deep"
+                                else SessionState.FEEDBACK_QUICK
+                            )
+                            await emit_state(prev_state)
 
                 await send(ToolResultMessage(call_id=call_id, result=result))
                 await send(LogMessage(
@@ -280,22 +333,69 @@ async def run_claude_session(websocket: Any, config: dict[str, Any]) -> None:
                 break
 
             elif msg_type == "target.set":
+                # Resolve preset if provided
+                preset_id = msg.get("preset_id")
+                description = msg.get("description", "")
+                target_bpm = msg.get("target_bpm")
+                target_notes = msg.get("target_notes")
+                difficulty = msg.get("difficulty", "beginner")
+
+                if preset_id:
+                    from presets import get_preset
+                    preset = get_preset(preset_id)
+                    if preset:
+                        description = description or preset["description"]
+                        target_bpm = target_bpm or preset["target_bpm"]
+                        target_notes = target_notes or preset["target_notes"]
+                        difficulty = difficulty or preset["difficulty"]
+                    else:
+                        await send(TargetValidationMessage(
+                            valid=False,
+                            errors=[f"Unknown preset: {preset_id}"],
+                        ))
+                        continue
+
                 prev = sess.state
-                sess.set_target(
-                    description=msg.get("description", ""),
-                    target_bpm=msg.get("target_bpm"),
-                    target_notes=msg.get("target_notes"),
-                    difficulty=msg.get("difficulty", "beginner"),
+                validation = sess.set_target(
+                    description=description,
+                    target_bpm=target_bpm,
+                    target_notes=target_notes,
+                    difficulty=difficulty,
                 )
+
+                if not validation.valid:
+                    await send(TargetValidationMessage(
+                        valid=False,
+                        errors=validation.errors,
+                        warnings=validation.warnings,
+                    ))
+                    continue
+
+                if validation.warnings:
+                    await send(TargetValidationMessage(
+                        valid=True,
+                        warnings=validation.warnings,
+                    ))
+
                 await emit_state(prev)
+                await collector.record("target.set", session_id, {
+                    "description": description,
+                    "bpm": target_bpm,
+                    "difficulty": difficulty,
+                })
                 # Acknowledge to Claude so it can greet the user with the target
+                warning_text = (
+                    f" (Warnings: {'; '.join(validation.warnings)})"
+                    if validation.warnings else ""
+                )
                 user_content = [{
                     "type": "text",
                     "text": (
-                        f"Target passage set: {msg.get('description', '(unnamed)')}"
-                        + (f" at {msg.get('target_bpm')} BPM" if msg.get('target_bpm') else "")
-                        + f". Difficulty: {msg.get('difficulty', 'beginner')}."
-                        " Acknowledge the target and tell the user to record a take when ready."
+                        f"Target passage set: {description}"
+                        + (f" at {target_bpm} BPM" if target_bpm else "")
+                        + f". Difficulty: {difficulty}."
+                        + warning_text
+                        + " Acknowledge the target and tell the user to record a take when ready."
                     ),
                 }]
                 await handle_turn(user_content, _system_with_context())
@@ -363,6 +463,9 @@ async def run_claude_session(websocket: Any, config: dict[str, Any]) -> None:
         except Exception:
             pass
     finally:
+        await collector.record("session.end", session_id, {
+            "duration_s": round(time.time() - sess.created_at, 1),
+        })
         drop_session(session_id)
         await send(SessionEndedMessage())
         await send(StatusMessage(state="ended"))

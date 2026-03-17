@@ -10,7 +10,8 @@ export type ClientMessage =
   | { type: "input.audio_recording"; audio_b64: string; duration_s?: number } // full WAV buffer (Eurydice)
   | { type: "input.image"; image: string; mime_type: string }
   | { type: "input.interrupt" }
-  | { type: "target.set"; description: string; target_bpm?: number; target_notes?: unknown[]; difficulty: string }
+  | { type: "target.set"; description: string; target_bpm?: number; target_notes?: unknown[]; difficulty: string; preset_id?: string }
+  | { type: "user.disagreement"; attempt_number: number; reason?: string }
 
 export interface SessionConfig {
   system_instruction: string
@@ -34,6 +35,8 @@ export type ServerMessage =
   | { type: "session.state"; state: string; previous?: string }
   | { type: "mastery.update"; consecutive_passes: number; passes_needed: number; mastered: boolean; gate_detail: MasteryGateDetail; attempt_number: number }
   | { type: "mastery.achieved"; total_attempts: number; passage_description?: string }
+  | { type: "target.validation"; valid: boolean; errors: string[]; warnings: string[] }
+  | { type: "capture.invalid"; analysis_confidence: number; capture_quality: string; reasons: string[] }
 
 export type ConnectionState = "idle" | "connecting" | "live" | "error" | "ended"
 
@@ -122,10 +125,20 @@ export interface NoteEvent {
   confidence?: number
 }
 
+export interface CaptureQuality {
+  duration_ok: boolean
+  duration_s: number
+  noise_floor_ok: boolean
+  clipping_detected: boolean
+  overall: "good" | "marginal" | "poor"
+}
+
 export interface AudioAnalysisResult {
   mode: "quick" | "deep"
   tempo_bpm?: number
   tempo_confidence?: number
+  analysis_confidence?: number
+  capture_quality?: CaptureQuality
   performance_scores?: PerformanceScores
   note_events?: NoteEvent[]
   alignment?: {
@@ -135,6 +148,13 @@ export interface AudioAnalysisResult {
   }
   warnings?: string[]
   _note?: string
+}
+
+export interface PresetPassage {
+  id: string
+  description: string
+  target_bpm: number
+  difficulty: DifficultyLevel
 }
 
 export interface CoachingResponse {
