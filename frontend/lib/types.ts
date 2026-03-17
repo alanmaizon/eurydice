@@ -6,9 +6,11 @@ export type ClientMessage =
   | { type: "session.start"; config: SessionConfig }
   | { type: "session.end" }
   | { type: "input.text"; text: string }
-  | { type: "input.audio"; audio: string } // base64 PCM 16-bit 16kHz mono
+  | { type: "input.audio"; audio: string } // base64 PCM 16-bit 16kHz mono (Gemini Live)
+  | { type: "input.audio_recording"; audio_b64: string; duration_s?: number } // full WAV buffer (Eurydice)
   | { type: "input.image"; image: string; mime_type: string }
   | { type: "input.interrupt" }
+  | { type: "target.set"; description: string; target_bpm?: number; target_notes?: unknown[]; difficulty: string }
 
 export interface SessionConfig {
   system_instruction: string
@@ -28,6 +30,10 @@ export type ServerMessage =
   | { type: "error"; message: string; code?: string }
   | { type: "status"; state: ConnectionState }
   | { type: "log"; event: string; data?: unknown; timestamp?: string }
+  // Eurydice-specific
+  | { type: "session.state"; state: string; previous?: string }
+  | { type: "mastery.update"; consecutive_passes: number; passes_needed: number; mastered: boolean; gate_detail: MasteryGateDetail; attempt_number: number }
+  | { type: "mastery.achieved"; total_attempts: number; passage_description?: string }
 
 export type ConnectionState = "idle" | "connecting" | "live" | "error" | "ended"
 
@@ -52,6 +58,7 @@ export interface TranscriptMessage {
   // Eurydice tools
   audioAnalysisResult?: AudioAnalysisResult
   visionAnalysisResult?: VisionAnalysisResult
+  coachingResult?: CoachingResponse
 }
 
 // ── Tool results ──────────────────────────────────────────────────────────────
@@ -130,6 +137,16 @@ export interface AudioAnalysisResult {
   _note?: string
 }
 
+export interface CoachingResponse {
+  observed_issue: string
+  likely_cause?: string
+  primary_correction: string
+  drill: string
+  success_criterion: string
+  confidence_note?: string
+  mastery_status?: "progressing" | "close" | "mastered"
+}
+
 export interface TechniqueFlag {
   flag: string
   severity: "low" | "medium" | "high"
@@ -167,6 +184,22 @@ export interface ToolCallRecord {
 
 export type DifficultyLevel = "beginner" | "intermediate" | "advanced"
 
+// ── Mastery ────────────────────────────────────────────────────────────────────
+
+export interface MasteryGateDetail {
+  timing:     { score: number; threshold: number; ok: boolean }
+  notes:      { score: number; threshold: number; ok: boolean }
+  confidence: { score: number; threshold: number; ok: boolean }
+}
+
+export interface MasteryState {
+  consecutivePasses: number
+  passesNeeded: number
+  mastered: boolean
+  attemptNumber: number
+  gateDetail: MasteryGateDetail
+}
+
 // ── Session state ─────────────────────────────────────────────────────────────
 
 export interface SessionState {
@@ -182,4 +215,12 @@ export interface SessionState {
   pinnedPassage: string | null
   /** Feature E: current learner difficulty level */
   difficultyLevel: DifficultyLevel
+  /** Eurydice: backend session state machine state */
+  sessionMachineState: string
+  /** Eurydice: most recent mastery gate result */
+  masteryState: MasteryState | null
+  /** Eurydice: current target passage description */
+  targetDescription: string | null
+  /** Eurydice: current target BPM */
+  targetBpm: number | null
 }

@@ -12,16 +12,53 @@
       "Bash(pip install:*)",
       "Bash(pip index:*)",
       "Bash(python3 -c \"import sys; print\\(sys.executable, sys.version\\)\")",
-      "Bash(pip show:*)"
+      "Bash(pip show:*)",
+      "Bash(jq -e ':*)",
+      "Bash(npx tsc:*)",
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "Bash(npm install:*)"
     ]
   },
   "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // \"\"' | { read -r f; case \"$f\" in *.py) cd /Users/alanmaizon/eurydice/backend && /opt/anaconda3/bin/python3 -m pytest tests/ -x -q 2>&1 | tail -20 ;; esac; } 2>/dev/null || true",
+            "timeout": 30,
+            "statusMessage": "Running backend tests..."
+          },
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // \"\"' | { read -r f; case \"$f\" in *.ts|*.tsx) cd /Users/alanmaizon/eurydice/frontend && npx tsc --noEmit 2>&1 | tail -30 ;; esac; } 2>/dev/null || true",
+            "timeout": 30,
+            "statusMessage": "Type-checking frontend..."
+          },
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // \"\"' | { read -r f; case \"$f\" in *.py|*.ts|*.tsx) hits=$(grep -in 'logos\\|philolog' \"$f\" 2>/dev/null | grep -v 'legacy\\|# .*logos\\|//.*logos' | head -3); [ -n \"$hits\" ] && echo \"DOMAIN LEAK in $f: $hits\" || true ;; esac; } 2>/dev/null || true",
+            "timeout": 5,
+            "statusMessage": "Checking domain boundaries..."
+          },
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // \"\"' | { read -r f; case \"$f\" in *session*.py|*state*.py) /opt/anaconda3/bin/python3 -c \"import ast; tree=ast.parse(open('$f').read()); enums=[n.name for n in ast.walk(tree) if isinstance(n,ast.ClassDef) and 'State' in n.name]; enums and print('State classes:',enums) or print('WARNING: no state machine in $f')\" 2>/dev/null || true ;; esac; } 2>/dev/null || true",
+            "timeout": 5,
+            "statusMessage": "Validating state machine..."
+          }
+        ]
+      }
+    ],
     "PostCompact": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -c \"\nimport json, sys\ndata = json.load(sys.stdin)\nsummary = data.get('summary', '')\nif summary:\n    footer = '\\n\\nContinue the conversation from where it left off without asking the user any further questions. Resume directly \\u2014 do not acknowledge the summary, do not recap what was happening, do not preface with \\\"I will continue\\\" or similar. Pick up the last task as if the break never happened.\\n'\n    open('/Users/alanmaizon/eurydice/CONTEXT.md', 'w').write('# CONTEXT.md\\n\\n' + summary + footer)\n\" 2>/dev/null || true",
+            "command": "python3 -c \"\nimport json, sys, os\ndata = json.load(sys.stdin)\nsummary = data.get('summary', '')\nif summary:\n    phase_file = '/Users/alanmaizon/eurydice/.current-phase'\n    phase = open(phase_file).read().strip() if os.path.exists(phase_file) else 'unknown'\n    footer = '\\n\\nCurrent dev phase: ' + phase + '\\n\\nContinue the conversation from where it left off without asking the user any further questions. Resume directly \\u2014 do not acknowledge the summary, do not recap what was happening, do not preface with \\\"I will continue\\\" or similar. Pick up the last task as if the break never happened.\\n'\n    open('/Users/alanmaizon/eurydice/CONTEXT.md', 'w').write('# CONTEXT.md\\n\\n' + summary + footer)\n\" 2>/dev/null || true",
+            "timeout": 10,
             "statusMessage": "Updating CONTEXT.md..."
           }
         ]

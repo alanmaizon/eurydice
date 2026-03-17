@@ -13,6 +13,8 @@ import {
   Zap,
 } from "lucide-react"
 import type { ConnectionState } from "@/lib/types"
+import type { RecordingState } from "@/hooks/useRecording"
+import { IS_EURYDICE } from "@/lib/constants"
 import { cn } from "@/lib/utils"
 
 interface ComposerBarProps {
@@ -28,6 +30,11 @@ interface ComposerBarProps {
   onToggleCamera: (videoEl?: HTMLVideoElement) => void
   onCaptureAndSendImage: () => void
   onInterrupt: () => void
+  // Eurydice recording
+  recordingState?: RecordingState
+  recordingDurationS?: number
+  onStartRecording?: () => void
+  onStopRecording?: () => void
 }
 
 export function ComposerBar({
@@ -43,6 +50,10 @@ export function ComposerBar({
   onToggleCamera,
   onCaptureAndSendImage,
   onInterrupt,
+  recordingState = "idle",
+  recordingDurationS = 0,
+  onStartRecording,
+  onStopRecording,
 }: ComposerBarProps) {
   const [text, setText] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -93,28 +104,62 @@ export function ComposerBar({
       <div className="flex items-end gap-2 px-3 py-2 max-w-3xl mx-auto">
         {/* Media controls */}
         <div className="flex items-center gap-1 pb-1">
-          {/*
-           * Mic button — state semantics:
-           *   off (default)   → MicOff icon, muted grey styling
-           *   on (capturing)  → Mic icon,    accent/active styling
-           *   error/denied    → MicOff icon, error/red styling (distinct from "on")
-           */}
-          <button
-            onClick={onToggleMic}
-            disabled={!canInteract}
-            className={cn(
-              "p-2 rounded-lg transition-colors",
-              audioError
-                ? "text-[var(--error)] bg-[var(--error-surface)]"
-                : isAudioCapturing
-                  ? "text-[var(--accent)] bg-[var(--surface-hover)]"
-                  : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)]",
-              !canInteract && "opacity-40 cursor-not-allowed"
-            )}
-            title={isAudioCapturing ? "Stop mic" : "Start mic"}
-          >
-            {isAudioCapturing ? <Mic size={18} /> : <MicOff size={18} />}
-          </button>
+          {IS_EURYDICE ? (
+            /* ── Eurydice: Record button replaces streaming mic ─────────────── */
+            recordingState === "recording" ? (
+              <button
+                onClick={onStopRecording}
+                disabled={!canInteract}
+                className={cn(
+                  "flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors",
+                  "text-[var(--error)] bg-[var(--error-surface)] animate-pulse",
+                  !canInteract && "opacity-40 cursor-not-allowed"
+                )}
+                title="Stop recording"
+              >
+                <Circle size={10} className="fill-current" />
+                <span className="font-mono">
+                  {Math.floor(recordingDurationS / 60) > 0
+                    ? `${Math.floor(recordingDurationS / 60)}:${(recordingDurationS % 60).toString().padStart(2, "0")}`
+                    : `${recordingDurationS}s`}
+                </span>
+              </button>
+            ) : (
+              <button
+                onClick={onStartRecording}
+                disabled={!canInteract || recordingState === "ready"}
+                className={cn(
+                  "flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors",
+                  audioError
+                    ? "text-[var(--error)] bg-[var(--error-surface)]"
+                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)]",
+                  (!canInteract || recordingState === "ready") && "opacity-40 cursor-not-allowed"
+                )}
+                title="Record a guitar take"
+              >
+                <Circle size={10} className="fill-current text-[var(--error)]" />
+                <span>Record</span>
+              </button>
+            )
+          ) : (
+            /* ── Logos: streaming mic (original) ──────────────────────────── */
+            <button
+              onClick={onToggleMic}
+              disabled={!canInteract}
+              className={cn(
+                "p-2 rounded-lg transition-colors",
+                audioError
+                  ? "text-[var(--error)] bg-[var(--error-surface)]"
+                  : isAudioCapturing
+                    ? "text-[var(--accent)] bg-[var(--surface-hover)]"
+                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)]",
+                !canInteract && "opacity-40 cursor-not-allowed"
+              )}
+              title={isAudioCapturing ? "Stop mic" : "Start mic"}
+            >
+              {isAudioCapturing ? <Mic size={18} /> : <MicOff size={18} />}
+            </button>
+          )}
 
           {/*
            * Camera toggle — state semantics:

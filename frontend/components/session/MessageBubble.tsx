@@ -95,6 +95,7 @@ import { ParseCard } from "./ParseCard"
 import { LexiconCard } from "./LexiconCard"
 import { ScansionCard } from "./ScansionCard"
 import { AudioAnalysisCard, VisionAnalysisCard } from "./AnalysisCard"
+import { CoachingCard } from "./CoachingCard"
 import { ImageMessage } from "./ImageMessage"
 import { StreamingIndicator } from "./StreamingIndicator"
 import { APP_NAME } from "@/lib/constants"
@@ -195,6 +196,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         {/* Tool result cards — Eurydice */}
         {message.audioAnalysisResult && <AudioAnalysisCard result={message.audioAnalysisResult} />}
         {message.visionAnalysisResult && <VisionAnalysisCard result={message.visionAnalysisResult} />}
+        {message.coachingResult && <CoachingCard result={message.coachingResult} />}
 
         {/* Copy button */}
         {message.content && !message.isStreaming && (

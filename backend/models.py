@@ -97,3 +97,44 @@ class LogMessage(BaseModel):
     event: str
     data: Optional[Any] = None
     timestamp: Optional[str] = None
+
+
+# ── Eurydice-specific server → client ─────────────────────────────────────────
+
+class StateChangedMessage(BaseModel):
+    type: Literal["session.state"] = "session.state"
+    state: str
+    previous: Optional[str] = None
+
+
+class MasteryUpdateMessage(BaseModel):
+    type: Literal["mastery.update"] = "mastery.update"
+    consecutive_passes: int
+    passes_needed: int
+    mastered: bool
+    gate_detail: Any
+    attempt_number: int
+
+
+class MasteryAchievedMessage(BaseModel):
+    type: Literal["mastery.achieved"] = "mastery.achieved"
+    total_attempts: int
+    passage_description: Optional[str] = None
+
+
+# ── Eurydice-specific client → server ─────────────────────────────────────────
+
+class AudioRecordingMessage(BaseModel):
+    """Full recording buffer (base64 WAV) — distinct from the streaming input.audio."""
+    type: Literal["input.audio_recording"]
+    audio_b64: str          # base64 WAV
+    duration_s: Optional[float] = None
+
+
+class TargetSetMessage(BaseModel):
+    """User defines the target passage before recording."""
+    type: Literal["target.set"]
+    description: str = ""
+    target_bpm: Optional[float] = None
+    target_notes: Optional[list[Any]] = None
+    difficulty: str = "beginner"

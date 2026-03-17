@@ -259,6 +259,50 @@ EURYDICE_TOOL_DECLARATIONS = [
         },
     },
     {
+        "name": "coaching_response",
+        "description": (
+            "ALWAYS call this tool after audio_analysis (and vision_analysis if used) "
+            "to deliver structured teaching feedback. "
+            "Do NOT write coaching as plain prose — use this tool every time. "
+            "Fill every required field based on the analysis results and the learner's history."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "observed_issue": {
+                    "type": "string",
+                    "description": "What the analysis measured — be specific, reference timestamps or scores.",
+                },
+                "likely_cause": {
+                    "type": "string",
+                    "description": "The probable root cause of the issue.",
+                },
+                "primary_correction": {
+                    "type": "string",
+                    "description": "The single highest-leverage fix. One actionable sentence.",
+                },
+                "drill": {
+                    "type": "string",
+                    "description": "A specific 20–60 second practice exercise targeting the issue.",
+                },
+                "success_criterion": {
+                    "type": "string",
+                    "description": "One clear, measurable condition for the next take to pass.",
+                },
+                "confidence_note": {
+                    "type": "string",
+                    "description": "Optional caveat about analysis confidence or capture quality.",
+                },
+                "mastery_status": {
+                    "type": "string",
+                    "enum": ["progressing", "close", "mastered"],
+                    "description": "'close' = one more pass needed, 'mastered' = gate passed.",
+                },
+            },
+            "required": ["observed_issue", "primary_correction", "drill", "success_criterion"],
+        },
+    },
+    {
         "name": "vision_analysis",
         "description": (
             "Analyze a photograph or video frame of a guitarist's hands/posture. "
@@ -350,15 +394,21 @@ def execute_eurydice_tool_mock(tool_name: str, args: dict[str, Any]) -> Any:
         return MOCK_AUDIO_DEEP if mode == "deep" else MOCK_AUDIO_QUICK
     if tool_name == "vision_analysis":
         return MOCK_VISION
+    if tool_name == "coaching_response":
+        # Passthrough — Claude provides all fields directly
+        return args
     return {"error": f"Unknown Eurydice tool: {tool_name}"}
 
 
-def execute_eurydice_tool_live(tool_name: str, args: dict[str, Any]) -> Any:
+def execute_eurydice_tool_live(tool_name: str, args: dict[str, Any]) -> Any:  # noqa: PLR0911
     """
     Execute Eurydice tool calls against real analysis pipelines.
     Falls back to mock results if a pipeline dependency is missing or fails.
     """
     try:
+        if tool_name == "coaching_response":
+            # Passthrough — Claude provides all fields; we just echo them back
+            return args
         if tool_name == "audio_analysis":
             from audio_pipeline import analyze_audio
             return analyze_audio(args)

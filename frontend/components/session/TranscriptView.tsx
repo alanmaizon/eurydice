@@ -1,9 +1,11 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import type { ConnectionState, TranscriptMessage } from "@/lib/types"
+import type { ConnectionState, MasteryState, TranscriptMessage } from "@/lib/types"
+import { IS_EURYDICE, APP_NAME } from "@/lib/constants"
 import { MessageBubble } from "./MessageBubble"
 import { PinnedPassageCard } from "./PinnedPassageCard"
+import { TargetPassageCard } from "./TargetPassageCard"
 import { StreamingIndicator } from "./StreamingIndicator"
 import { cn } from "@/lib/utils"
 
@@ -13,6 +15,10 @@ interface TranscriptViewProps {
   connectionState: ConnectionState
   pinnedPassage?: string | null
   onClearPassage?: () => void
+  // Eurydice-specific
+  masteryState?: MasteryState | null
+  targetDescription?: string | null
+  targetBpm?: number | null
 }
 
 export function TranscriptView({
@@ -21,6 +27,9 @@ export function TranscriptView({
   connectionState,
   pinnedPassage,
   onClearPassage,
+  masteryState,
+  targetDescription,
+  targetBpm,
 }: TranscriptViewProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -46,12 +55,20 @@ export function TranscriptView({
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Feature D: Pinned passage card (always visible above scroll area) */}
-      {pinnedPassage && (
+      {/* Pinned card — Eurydice: target + mastery; Logos: passage close-reading */}
+      {IS_EURYDICE && targetDescription ? (
+        <div className="pt-3 shrink-0">
+          <TargetPassageCard
+            description={targetDescription}
+            targetBpm={targetBpm}
+            masteryState={masteryState ?? null}
+          />
+        </div>
+      ) : !IS_EURYDICE && pinnedPassage ? (
         <div className="pt-3 shrink-0">
           <PinnedPassageCard text={pinnedPassage} onClear={onClearPassage ?? (() => {})} />
         </div>
-      )}
+      ) : null}
     <div
       ref={containerRef}
       onScroll={handleScroll}
@@ -66,7 +83,7 @@ export function TranscriptView({
               style={{ background: "var(--accent)", animation: "pulse-dot 1s ease-in-out infinite" }}
             />
             <span className="text-sm" style={{ color: "var(--text-secondary)" }}>
-              Connecting to Logos…
+              Connecting to {APP_NAME}…
             </span>
           </div>
         </div>

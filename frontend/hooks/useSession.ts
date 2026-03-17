@@ -4,11 +4,14 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useWebSocket } from "./useWebSocket"
 import { useAudioCapture } from "./useAudioCapture"
 import { useCamera } from "./useCamera"
+import { useRecording } from "./useRecording"
 import type {
+  CoachingResponse,
   ConnectionState,
   DifficultyLevel,
   InspectorEvent,
   LexiconResult,
+  MasteryState,
   ParseResult,
   ScansionResult,
   AudioAnalysisResult,
@@ -32,6 +35,10 @@ const INITIAL_STATE: SessionState = {
   tokenCount: 0,
   pinnedPassage: null,
   difficultyLevel: "intermediate",
+  sessionMachineState: "idle",
+  masteryState: null,
+  targetDescription: null,
+  targetBpm: null,
 }
 
 export function useSession() {
@@ -227,12 +234,14 @@ export function useSession() {
           // Route result to the correct card field based on which tool fired.
           const cardPatch: Pick<
             TranscriptMessage,
-            "parseResult" | "lexiconResult" | "scanResult" | "audioAnalysisResult" | "visionAnalysisResult"
+            "parseResult" | "lexiconResult" | "scanResult" | "audioAnalysisResult" | "visionAnalysisResult" | "coachingResult"
           > =
             toolName === "audio_analysis"
               ? { audioAnalysisResult: msg.result as AudioAnalysisResult }
               : toolName === "vision_analysis"
               ? { visionAnalysisResult: msg.result as VisionAnalysisResult }
+              : toolName === "coaching_response"
+              ? { coachingResult: msg.result as CoachingResponse }
               : toolName === "lookup_lexicon"
               ? { lexiconResult: msg.result as LexiconResult }
               : toolName === "scan_meter"
@@ -270,6 +279,29 @@ export function useSession() {
           setState((s) => ({ ...s, connectionState: "error" }))
           addTranscriptMessage("system", `Error: ${msg.message}`)
           stopTimer()
+          break
+
+        case "session.state":
+          setState((s) => ({ ...s, sessionMachineState: msg.state }))
+          break
+
+        case "mastery.update": {
+          const ms: MasteryState = {
+            consecutivePasses: msg.consecutive_passes,
+            passesNeeded: msg.passes_needed,
+            mastered: msg.mastered,
+            attemptNumber: msg.attempt_number,
+            gateDetail: msg.gate_detail,
+          }
+          setState((s) => ({ ...s, masteryState: ms }))
+          break
+        }
+
+        case "mastery.achieved":
+          addTranscriptMessage(
+            "system",
+            `🎸 Mastered${msg.passage_description ? ` — "${msg.passage_description}"` : ""}! (${msg.total_attempts} attempt${msg.total_attempts !== 1 ? "s" : ""})`
+          )
           break
 
         case "log":
@@ -462,6 +494,27 @@ export function useSession() {
   })
 
   const camera = useCamera()
+  const recording = useRecording()
+
+  // ── Eurydice: send a completed WAV recording ───────────────────────────────
+  const sendRecording = useCallback(
+    (wavB64: string, durationS: number) => {
+      const label = `[Guitar take — ${durationS}s]`
+      addTranscriptMessage("user", label)
+      send({ type: "input.audio_recording", audio_b64: wavB64, duration_s: durationS })
+      recording.discard()
+    },
+    [send, recording] // eslint-disable-line react-hooks/exhaustive-deps
+  )
+
+  // ── Eurydice: define the target passage ────────────────────────────────────
+  const setTarget = useCallback(
+    (description: string, targetBpm?: number, difficulty = "beginner") => {
+      send({ type: "target.set", description, target_bpm: targetBpm, difficulty })
+      setState((s) => ({ ...s, targetDescription: description, targetBpm: targetBpm ?? null }))
+    },
+    [send]
+  )
 
   return {
     state,
@@ -470,6 +523,8 @@ export function useSession() {
     endSession,
     sendText,
     sendImage,
+    sendRecording,
+    setTarget,
     interrupt,
     loadPassage,
     clearPassage,
@@ -477,5 +532,6 @@ export function useSession() {
     clearInspector,
     audio,
     camera,
+    recording,
   }
 }

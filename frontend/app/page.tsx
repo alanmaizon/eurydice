@@ -8,7 +8,8 @@ import { ComposerBar } from "@/components/layout/ComposerBar"
 import { InspectorDrawer } from "@/components/layout/InspectorDrawer"
 import { WelcomeView } from "@/components/welcome/WelcomeView"
 import { TranscriptView } from "@/components/session/TranscriptView"
-import { DEFAULT_SYSTEM_INSTRUCTION } from "@/lib/constants"
+import { RecordingCard } from "@/components/session/RecordingCard"
+import { DEFAULT_SYSTEM_INSTRUCTION, IS_EURYDICE } from "@/lib/constants"
 
 // ── Live camera preview strip ────────────────────────────────────────────────
 // Uses its own local videoRef so it never competes with useCamera's videoRef
@@ -115,6 +116,7 @@ export default function ConsolePage() {
     endSession,
     sendText,
     sendImage,
+    sendRecording,
     interrupt,
     loadPassage,
     clearPassage,
@@ -122,6 +124,7 @@ export default function ConsolePage() {
     clearInspector,
     audio,
     camera,
+    recording,
   } = useSession()
 
   const hasSession =
@@ -159,6 +162,9 @@ export default function ConsolePage() {
               connectionState={state.connectionState}
               pinnedPassage={state.pinnedPassage}
               onClearPassage={clearPassage}
+              masteryState={state.masteryState}
+              targetDescription={state.targetDescription}
+              targetBpm={state.targetBpm}
             />
           )}
         </div>
@@ -173,18 +179,27 @@ export default function ConsolePage() {
         />
       )}
 
+      {/* Recording preview — appears when a take is ready to send */}
+      {IS_EURYDICE && recording.recordingState === "ready" && recording.wavB64 && (
+        <RecordingCard
+          durationS={recording.durationS}
+          onSend={() => sendRecording(recording.wavB64!, recording.durationS)}
+          onDiscard={recording.discard}
+        />
+      )}
+
       <ComposerBar
         connectionState={state.connectionState}
         isAudioCapturing={audio.isCapturing}
         isCameraActive={camera.isActive}
-        audioError={audio.error}
+        audioError={audio.error ?? recording.error}
         cameraError={camera.error}
         onStartSession={() => startSession(systemInstruction, state.difficultyLevel)}
         onEndSession={endSession}
         onSendText={sendText}
         onToggleMic={audio.toggle}
         onToggleCamera={() => {
-          if (camera.isActive) setLastCapture(null) // clear stale capture on stop
+          if (camera.isActive) setLastCapture(null)
           camera.toggle()
         }}
         onCaptureAndSendImage={() => {
@@ -195,6 +210,10 @@ export default function ConsolePage() {
           }
         }}
         onInterrupt={interrupt}
+        recordingState={recording.recordingState}
+        recordingDurationS={recording.durationS}
+        onStartRecording={recording.start}
+        onStopRecording={recording.stop}
       />
 
       <InspectorDrawer
