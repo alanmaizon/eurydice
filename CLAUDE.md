@@ -1,314 +1,299 @@
 # CLAUDE.md
 
-## Project: Eurydice
+## Mission
 
-Eurydice is a multimodal AI music-teaching product focused first on guitar.
+You are working on **Eurydice**, an AI music-teaching product focused first on guitar.
 
-This repository may contain ideas, patterns, or infrastructure that originated in a different teaching domain. Do **not** preserve that prior domain as a visible namespace, product concept, prompt identity, or architectural dependency.
+Your job is to help transform the existing codebase into a **domain-agnostic teaching engine** with **Eurydice as the active domain module**.
 
-### Domain sanitization rule
+The product goal is not “audio analysis” and not “chat.”  
+The product goal is:
 
-A previous domain may exist in the codebase as legacy implementation detail only. Your job is to **sanitize** it out of the active architecture.
+> **measurable, repeatable musical progress**
 
-That means:
+The core user outcome is:
 
-- do **not** keep prior domain names in public modules, prompts, events, schemas, UI copy, or package boundaries
-- do **not** preserve legacy domain branding as the default abstraction
-- do **not** build Eurydice as a thin rename over a prior domain-specific app
-- do build a **domain-agnostic teaching engine**
-- do implement **Eurydice** as a clean domain module on top of that engine
-- if legacy code is reused, isolate it behind neutral interfaces and rename aggressively
+> **A guitarist reliably masters a short passage they care about (10–30 seconds) to a defined standard of timing and note accuracy, and can repeat it on demand.**
 
-Treat any prior domain as:
-- a source of reusable runtime patterns
-- a migration reference
-- a legacy module that should not leak into the new product surface
+Every architectural and product decision should support that outcome.
 
 ---
 
 ## North Star
 
-The product must optimize for one outcome:
-
-**A guitarist reliably masters a short passage they care about (10–30 seconds) to a defined standard of timing and note accuracy, and can repeat it on demand.**
-
-Do not optimize for:
-- chat quality alone
-- transcription novelty
-- generic encouragement
-- raw feature count
-- vague “AI coach” behavior
-
-Optimize for:
-- measurable progress
-- repeatable mastery
-- tight correction loops
-- trustworthy feedback
-- fast iteration toward a successful next take
-
----
-
-## Product definition
-
-Eurydice should feel like:
-
-- a live teacher
-- a measurement-driven coach
-- a short-loop practice system
-- “Guitar Hero, but real”
-
-The user experience should be:
-
-1. choose or define a short passage
-2. record a take
-3. analyze timing, notes, and optionally technique
-4. identify the single highest-leverage correction
-5. prescribe one short drill
-6. retry
-7. declare mastery only when the gate is met
-
----
-
-## Hard architectural constraints
-
-### Claude role boundary
-
-Claude is the **teaching and orchestration layer**.
-
-Claude is responsible for:
-- tool planning
-- interpretation of analysis outputs
-- pedagogical prioritization
-- learner-facing responses
-- session memory and progression logic
-- deciding when more evidence is needed
-
-Claude is **not** the raw audio analysis engine.
-
-Do not assume native realtime audio understanding as the core backend primitive.
-
-Instead:
-
-- audio tools produce measurements
-- vision tools produce technique observations
-- Claude consumes structured outputs with confidence values
-- Claude turns those outputs into coaching
-
-### Confidence rule
-
-Never smooth over uncertainty.
-
-If analysis confidence is low:
-- ask for a better take
-- request slower tempo
-- request cleaner capture
-- request isolated instrument input
-- request different camera angle
-
-Do not hallucinate technique advice from weak evidence.
-
----
-
-## Backbone principles
-
-1. **Mastery-loop first**
-   Every session should drive toward a mastery decision, not a conversation.
-
-2. **Measurement before explanation**
-   Feedback must be grounded in tool outputs.
-
-3. **One correction first**
-   Prefer the highest-leverage fix over broad feedback dumps.
-
-4. **Two-speed analysis**
-   Return quick feedback fast, then deeper analysis if needed.
-
-5. **Confidence-aware coaching**
-   Every important inference should respect tool confidence.
-
-6. **Domain-agnostic core**
-   Reusable runtime belongs in core. Eurydice-specific logic belongs in a domain module.
-
-7. **No legacy domain leakage**
-   Legacy names, types, prompts, routes, events, and copy must be sanitized.
-
----
-
-## Primary user loop
-
-The main loop is:
-
-1. user selects a passage and target tempo
-2. user records audio and optional camera input
-3. system runs quick analysis
-4. if confidence is too low, request better input
-5. if confidence is sufficient, score and localize the top issue
-6. if needed, run deep analysis
-7. Claude generates:
-   - one primary correction
-   - one short drill
-   - one success criterion for the next take
-8. user retries
-9. system checks mastery gate
-10. if passed, log a mastery event and recommend next progression step
-
----
-
-## Mastery model
-
-A passage is considered mastered only when the user achieves repeated acceptable performance under explicit thresholds.
-
-### Mastery gate
-
-A **Mastery Event** occurs when the user completes:
-
-- **3 consecutive passes**
-- on the **same passage**
-- meeting:
-  - timing threshold
-  - note accuracy threshold
-  - minimum confidence threshold
-
-Do not declare mastery from a single lucky pass.
-
-### North Star metric
-
-Track:
-
+### Product North Star
 **Weekly Mastery Events per Active User (WME/AU)**
 
-Use this as the product-level decision metric.
+A **Mastery Event** occurs when a user achieves repeated successful passes of the same passage under a defined mastery gate.
 
-Features that do not improve mastery outcomes are lower priority.
+### Mastery Gate
+A passage is only considered mastered when:
+- the user completes **N consecutive passes** of the same passage
+- each pass meets the minimum timing threshold
+- each pass meets the minimum note correctness threshold
+- the tool confidence is above the minimum confidence gate
+- no low-confidence analysis is being silently treated as reliable
 
----
+Default initial target:
+- `consecutive_passes_required = 3`
+- `timing_score >= 0.85`
+- `note_score >= 0.80`
+- `confidence >= 0.70`
 
-## Initial product scope
-
-Focus the MVP on:
-
-- short guitar passages
-- single-note or monophonic-ish phrases first
-- timing + pitch/note scoring
-- retry loop with measurable progress
-- optional vision-assisted technique cues
-
-Do **not** start with:
-- full song intelligence
-- rich social features
-- advanced composition tools
-- broad multi-instrument support
-- full polyphonic correctness claims
-- ornate dashboards before trust is established
+These values are starting points, not fixed truths. Keep them configurable.
 
 ---
 
-## Required architecture shape
+## Non-Negotiable Product Rules
 
-## 1. Core runtime
+1. **Mastery-loop first**
+   Every session must drive toward:
+   - diagnose
+   - drill
+   - retry
+   - verify mastery
 
-Create or refactor a reusable runtime layer for:
+2. **Do not bluff**
+   If the system is not confident, it must say so and ask for a better take, slower tempo, cleaner audio, isolated guitar, or a better camera angle.
 
-- session orchestration
-- tool registry
-- state transitions
-- retry handling
-- tracing
-- structured outputs
+3. **One high-leverage correction at a time**
+   Feedback should prioritize the single most important fix before listing secondary issues.
+
+4. **Evidence before explanation**
+   Feedback must be grounded in measured artifacts:
+   - timing drift
+   - missed notes
+   - wrong pitches
+   - alignment errors
+   - posture / technique flags
+   Never invent musical certainty.
+
+5. **Fast path + deep path**
+   Eurydice should feel responsive.
+   - quick feedback first
+   - heavy analysis second
+
+6. **Pedagogy over verbosity**
+   Do not produce long impressive explanations.
+   Prefer:
+   - one correction
+   - one drill
+   - one success criterion
+
+---
+
+## Claude Role Boundaries
+
+Claude is the **teaching and orchestration layer**, not the raw audio engine.
+
+Claude should do:
+- tool selection
+- tool sequencing
+- session-state-aware coaching
+- prioritization of the highest-impact correction
+- drill generation
+- mastery decision support
+- user-facing explanation and motivation
+
+Claude should not do:
+- raw DSP
+- note transcription internally
+- beat detection internally
+- pitch extraction internally
+- fake listening claims
+- unsupported claims about accuracy when tool confidence is low
+
+Never say or imply:
+- “I listened directly to your audio”
+- “I know exactly what you played”
+unless that conclusion is explicitly backed by tool outputs.
+
+---
+
+## Critical Technical Constraint
+
+Assume Claude is used as:
+- reasoning layer
+- pedagogy layer
+- multimodal interpretation layer for tool outputs and images
+
+Do **not** assume native realtime audio understanding comparable to a dedicated audio-native API stack.
+
+Architecture must therefore treat:
+- **audio tools as the ears**
+- **vision tools as the eyes**
+- **Claude as the teacher**
+
+---
+
+## Domain Sanitization Rule
+
+There may be prior domain-specific code in the repository from an earlier product.
+
+### Required behavior
+Do **not** preserve prior domain names, modules, prompts, events, or schemas as active architectural concepts.
+
+Instead:
+- extract reusable primitives into a **generic teaching engine**
+- rename domain-specific identifiers into neutral engine concepts
+- remove legacy domain names from active code paths
+- avoid carrying forward branded or topic-specific namespaces
+- keep only what is technically reusable
+
+### Important
+The previous domain should be treated only as a **legacy source of reusable implementation ideas**, not as a retained module identity.
+
+Bad:
+- preserving old domain namespace as a first-class module
+- new code depending on legacy prompts or domain types
+- mixed terminology across engine and Eurydice
+
+Good:
+- generic engine abstractions
+- clean Eurydice module on top
+- legacy-specific assumptions removed or isolated
+
+---
+
+## Required Target Architecture
+
+### 1. Generic teaching engine
+Create or refactor toward a domain-agnostic engine responsible for:
+- session lifecycle
+- orchestration loop
+- tool contracts
 - confidence propagation
+- telemetry
 - evaluation hooks
-
-Suggested neutral pathing:
-
-- `core/agent_runtime/`
-- `core/schemas/`
-- `core/session/`
-- `core/eval/`
-
-This layer must not contain music-specific or legacy-domain-specific assumptions.
-
-## 2. Eurydice domain module
-
-Implement Eurydice as a domain module with:
-
-- pedagogy
-- scoring
-- audio pipelines
-- vision pipelines
-- exercise content
-- mastery logic
+- retry / recovery behavior
+- state transitions
 
 Suggested structure:
 
-- `domains/eurydice/pedagogy/`
-- `domains/eurydice/scoring/`
-- `domains/eurydice/pipelines/audio/`
-- `domains/eurydice/pipelines/vision/`
-- `domains/eurydice/content/`
-- `domains/eurydice/prompts/`
-- `domains/eurydice/types/`
+- `engine/`
+  - `runtime/`
+  - `orchestration/`
+  - `sessions/`
+  - `contracts/`
+  - `telemetry/`
+  - `evaluation/`
+  - `utils/`
 
-## 3. Legacy isolation
+### 2. Eurydice domain module
+Eurydice should live as a clean domain implementation on top of the engine.
 
-If legacy code exists, isolate it under something like:
+Suggested structure:
 
-- `legacy/`
-- or `domains/legacy_<name>/`
+- `domains/eurydice/`
+  - `pedagogy/`
+  - `scoring/`
+  - `content/`
+  - `pipelines/audio/`
+  - `pipelines/vision/`
+  - `prompts/`
+  - `schemas/`
+  - `ui/`
 
-Do not keep it in the active runtime path unless explicitly needed during migration.
+### 3. Applications
+- `apps/web/`
+- `apps/api/`
+
+### 4. Evaluation
+- `eval/offline/`
+- `eval/online/`
+- `eval/human/`
 
 ---
 
-## Analysis pipeline
+## Required Session Model
 
-## Quick analysis path
+Design the Eurydice loop as an explicit state machine.
 
-This path should be optimized for speed and flow.
+Minimum states:
+- `idle`
+- `target_selected`
+- `recording`
+- `processing_quick`
+- `feedback_quick`
+- `processing_deep`
+- `feedback_deep`
+- `drill_assigned`
+- `retry_requested`
+- `mastered`
+- `capture_invalid`
+- `error`
 
-Use it for:
-- onset timing
-- tempo drift
-- rough pitch correctness
-- obvious wrong notes
-- basic confidence estimation
+Each transition should be explicit and testable.
+
+---
+
+## Backbone Workflow
+
+The core loop should behave like this:
+
+1. user selects or defines a target passage
+2. user records attempt
+3. quick audio analysis runs
+4. if confidence is too low:
+   - request improved capture
+   - do not continue as if reliable
+5. if confidence is acceptable:
+   - produce quick feedback
+6. if needed:
+   - run deep analysis
+   - optionally run vision analysis
+7. Claude interprets outputs
+8. Claude returns:
+   - one primary correction
+   - one drill
+   - one success criterion
+9. user retries
+10. mastery gate is checked
+11. if passed:
+   - log mastery event
+   - suggest next progression step
+
+---
+
+## Two-Speed Analysis Design
+
+### Quick analysis
+Optimize for speed and responsiveness.
+
+Use for:
+- onset / tempo estimation
+- rough pitch confidence
+- obvious timing drift
+- simple pass/fail guidance
+- capture quality checks
 
 Target:
-- first meaningful feedback should arrive quickly enough to preserve practice flow
+- first useful feedback should arrive quickly
 
-## Deep analysis path
+### Deep analysis
+Use when:
+- user wants detailed diagnosis
+- quick analysis indicates likely but uncertain issues
+- backing track or noise is present
+- note-level alignment is needed
 
-This path is for:
-- transcription refinement
-- alignment against target
-- source separation when backing track interferes
-- better error localization
+Use for:
+- transcription
+- source separation
+- alignment to reference
+- error localization
 - richer scoring
-- optional technique cross-checking
-
-Trigger deep analysis only when it materially improves the next teaching action.
+- vision-assisted technique flags
 
 ---
 
-## Audio tool responsibilities
+## Tooling Strategy
 
-Build the audio layer as a structured pipeline, not a monolith.
+### audio_analysis
+This is a deterministic tool service, not a vague model capability.
 
-Possible capabilities include:
-
-- onset detection
-- tempo estimation
-- beat tracking
-- pitch tracking
-- note event extraction
-- phrase alignment against target
-- confidence scoring
-- source separation when needed
-- capture-quality warnings
-
-### Audio output contract
-
-Standardize the audio analyzer output around a neutral schema such as:
-
+It should expose at minimum:
+- `mode`: `quick | deep`
 - `tempo_bpm`
 - `tempo_confidence`
 - `beat_times_s`
@@ -318,254 +303,307 @@ Standardize the audio analyzer output around a neutral schema such as:
 - `alignment`
 - `performance_scores`
 - `warnings`
+- `input_quality`
+- `analysis_confidence`
 
-Where possible, include:
-- timing score
-- note score
-- overall score
-- timestamped error regions
-- capture warnings
+### vision_analysis
+This should remain optional for early milestones but must follow a clean schema.
 
----
-
-## Vision tool responsibilities
-
-Vision is supportive, not primary, in early versions.
-
-Use it for:
-- hand presence
-- hand landmarks
-- fretboard visibility
-- posture hints
-- picking/fretting technique flags
-- camera quality warnings
-
-### Vision output contract
-
-Standardize output around a neutral schema such as:
-
+It should expose at minimum:
 - `hands_detected`
 - `hand_landmarks`
 - `handedness`
 - `technique_flags`
 - `capture_warnings`
+- `analysis_confidence`
 
-Only surface technique advice above confidence threshold.
+### orchestration
+Claude is the orchestration layer.
+Wrap Claude in a deterministic controller that:
+1. requests a structured plan
+2. executes tools
+3. requests a learner-facing response
+4. validates response shape before showing it
 
----
-
-## Claude orchestration policy
-
-Claude must act as a strict evidence-based teacher.
-
-### Claude should do
-
-- decide which tool to call next
-- decide whether quick analysis is sufficient
-- decide whether deep analysis is worth latency
-- identify the single most important correction
-- generate a short drill
-- define one clear success criterion
-- keep the user in a tight mastery loop
-- maintain session continuity and progression state
-
-### Claude should not do
-
-- pretend it directly heard raw audio if it did not
-- invent technique diagnoses without evidence
-- overload the learner with too many fixes
-- produce long persuasive reasoning that outruns the evidence
-- declare mastery on weak or noisy signals
-
-### Response format rule
-
-For each attempt, prefer output shaped like:
-
-- **Observed issue**
-- **Likely cause**
-- **Next drill**
-- **Success criterion for next take**
-
-Keep it concise, specific, and instructional.
+Do not let orchestration drift into freeform unstructured behavior.
 
 ---
 
-## Reasoning policy
+## Initial Audio Stack Guidance
+
+Use the stack pragmatically, not dogmatically.
+
+### Strong candidates
+- **Basic Pitch**
+  - phrase-level note transcription
+  - useful for audio-to-MIDI conversion
+- **librosa**
+  - analysis glue
+  - DTW alignment
+  - feature extraction
+- **CREPE**
+  - monophonic pitch tracking
+- **Demucs**
+  - optional source separation when backing tracks interfere
+- **Essentia**
+  - powerful MIR feature extraction, but treat licensing carefully
+- **aubio**
+  - useful for low-latency analysis, but treat licensing carefully
+
+### Licensing caution
+Before hardwiring any AGPL/GPL component into the core production path:
+- flag it clearly
+- isolate it architecturally
+- prefer permissive-license options when possible
+- never silently bake a licensing risk into the backbone
+
+---
+
+## Research-Informed Reasoning Policy
 
 Use reasoning selectively.
 
-Longer reasoning is not automatically better. For hard auditory tasks, excessive reasoning may degrade performance instead of helping. The Audio-CoT paper reports that CoT methods helped on easier and medium tasks but degraded on harder ones, while also showing a positive relationship between longer reasoning paths and accuracy in some settings. :contentReference[oaicite:0]{index=0}
+Audio-CoT-style findings suggest:
+- reasoning can help on easier and medium-difficulty tasks
+- reasoning may degrade performance on hard tasks if the chain becomes confusing
+- longer reasoning can correlate with better results, but not always
 
-Translate that into product policy:
+Therefore:
 
-- use shallow reasoning by default
-- use deeper reasoning only when evidence is strong and the latency budget allows
-- when the task is hard and confidence is weak, prefer data collection over more speculation
-- expose evidence to the user, not internal hidden reasoning
+### Do
+- use deeper reasoning when tool evidence is strong
+- use deeper reasoning when the user is stuck and more interpretation is needed
+- scale reasoning only when confidence and latency budgets allow
 
-Examples:
-- “Your note entries are late around 4.2s–5.1s”
-- “The bend is under pitch on the second repetition”
-- “Camera angle hides the fretting hand; retake from neck side”
+### Do not
+- generate long rationales by default
+- treat extra verbosity as intelligence
+- hide uncertainty behind polished explanations
 
----
-
-## Evaluation philosophy
-
-Evaluation must cover more than raw audio scoring.
-
-Adopt four internal evaluation lanes:
-
-1. **Auditory processing**
-   Can the system measure timing, pitch, and alignment correctly?
-
-2. **Reasoning**
-   Does it choose the right diagnosis and drill?
-
-3. **Dialogue / teaching loop**
-   Does it keep the learner progressing without confusion?
-
-4. **Trust / safety**
-   Does it avoid confident wrong feedback and unsafe advice?
-
-Build evaluation around:
-- offline benchmark performance
-- human teacher comparison
-- online mastery improvement
-- wrong-feedback reports
+### Product implication
+Prefer:
+- short evidence-backed coaching by default
+- deeper diagnosis only when warranted
+- visible evidence, not hidden internal chain-of-thought
 
 ---
 
-## MVP milestones
+## Required Feedback Format
 
-## Milestone A: Core mastery loop
+Unless a UI contract says otherwise, user-facing feedback should be compact and structured.
 
-Deliver:
-- passage selection or definition
-- short recording flow
-- quick timing + pitch scoring
-- one correction + one drill
-- mastery gate logic
-- confidence-based fallback messaging
+Default response shape:
+- `primary_correction`
+- `why_it_matters`
+- `drill`
+- `success_criterion`
+- `confidence_note` (only when needed)
 
-Acceptance:
-- user can retry in a clean loop
-- low-confidence cases do not bluff
-- mastery event logging works
-
-## Milestone B: Deep analysis
-
-Deliver:
-- note-event extraction
-- better alignment
-- deeper scoring
-- optional source separation when needed
-
-Acceptance:
-- deep analysis materially improves diagnosis
-- progress across retries is measurable
-
-## Milestone C: Vision-assisted coaching
-
-Deliver:
-- hand landmarks
-- 2–3 technique flags
-- camera guidance for better capture
-
-Acceptance:
-- only confident flags are shown
-- flags are understandable and actionable
-
-## Milestone D: Song-mode expansion
-
-Deliver:
-- reference alignment for larger material
-- automatic subdivision into micro-passages
-- progression across a section, not just one lick
-
-Acceptance:
-- section-level mastery works without destroying trust
+Example style:
+- specific
+- musical
+- timestamped if possible
+- string/fret aware if available
+- not patronizing
+- not robotic
 
 ---
 
-## Refactor mandate
+## Eurydice Pedagogy Rules
 
-When inspecting the current repo:
+The teacher persona should be:
+- precise
+- encouraging
+- evidence-based
+- concise
+- non-bluffing
 
-1. identify reusable runtime components
-2. identify domain-specific prompts, events, types, tools, and copy
-3. move reusable logic into neutral core modules
-4. move prior-domain artifacts into legacy or archive paths
-5. create clean Eurydice modules on top
-6. rename aggressively to remove domain leakage
-7. preserve behavior where useful, but not naming or conceptual coupling
+Pedagogical priorities:
+1. timing first when timing is the dominant issue
+2. note accuracy when wrong notes dominate
+3. technique only when visual evidence is strong enough
+4. avoid overloading beginners with multiple simultaneous corrections
+5. prefer drills that can be completed in 20–60 seconds
 
-### Explicit sanitization targets
-
-Sanitize all of the following if they reference the old domain:
-
-- folder names
-- type names
-- prompt files
-- event names
-- websocket message names
-- UI labels
-- CSS/test IDs if domain-specific
-- telemetry event names
-- system prompt language
-- documentation
-- example data
-- tests
-- screenshots or fixtures
-
-Do not leave “temporary” legacy names in new production paths.
+Every drill should target a specific failure mode.
 
 ---
 
-## Deliverables expected from Claude
+## Metrics That Must Exist
+
+At minimum, implement and track:
+
+### Product metric
+- `weekly_mastery_events_per_active_user`
+
+### Session metrics
+- `attempt_count_per_passage`
+- `time_to_first_feedback`
+- `time_to_mastery`
+- `retry_rate`
+- `capture_failure_rate`
+
+### Model/tool quality metrics
+- `timing_score`
+- `note_score`
+- `overall_score`
+- `analysis_confidence`
+- `false_mastery_rate`
+- `low_confidence_block_rate`
+
+### Trust metrics
+- `user_disagreement_reports`
+- `feedback_retraction_rate`
+- `low_confidence_override_count`
+
+---
+
+## MVP Scope
+
+### MVP definition
+Build the **passage mastery loop** for **short, mostly monophonic guitar phrases** before attempting full song-level chord-heavy mastery.
+
+### MVP must support
+- choose or define short target phrase
+- record attempt
+- run quick analysis
+- optionally run deep analysis
+- return one correction + one drill + one success criterion
+- retry loop
+- mastery gate
+- progress logging
+
+### MVP should not try to solve yet
+- full polyphonic music understanding
+- full song orchestration
+- advanced arrangement analysis
+- broad genre-level theory coaching
+- complicated multi-camera technique inference
+
+---
+
+## Required Migration Behavior
+
+When auditing the current repository:
+
+### First
+Identify:
+- reusable runtime pieces
+- reusable streaming/session pieces
+- reusable UI pieces
+- reusable tool infrastructure
+- reusable event pipelines
+
+### Then
+Classify everything into:
+- keep and generalize
+- keep and move under Eurydice
+- delete
+- rewrite
+
+### Important rule
+Do not perform a shallow rename.
+Perform a **conceptual extraction**:
+- generic behavior goes into engine
+- music-specific behavior goes into Eurydice
+- legacy-domain assumptions are removed
+
+---
+
+## Concrete Deliverables Expected From Claude
 
 When working in this repo, produce:
 
-1. an architecture audit
-2. a migration plan
-3. a proposed folder structure
-4. concrete refactors in priority order
-5. tool contracts for audio and vision analysis
-6. updated prompt architecture
-7. session-state changes
-8. mastery/scoring implementation
-9. evaluation hooks
-10. a usable first prototype path
+1. **Architecture audit**
+   - what exists
+   - what is reusable
+   - what is domain-specific
+   - what blocks Eurydice
 
-Prioritize minimal invasive refactors first, but do not compromise the domain sanitization rule.
+2. **Refactor plan**
+   - smallest viable path first
+   - minimal invasive changes before major rewrites
+
+3. **Folder structure proposal**
+
+4. **Typed contracts**
+   - session contracts
+   - audio analysis contracts
+   - vision analysis contracts
+   - coaching response contracts
+
+5. **Implementation roadmap**
+   - milestone order
+   - dependencies
+   - risk notes
+
+6. **Code changes**
+   - concrete patches, not just advice
+
+7. **Evaluation plan**
+   - offline
+   - online
+   - human review
 
 ---
 
-## First implementation target
+## Coding Behavior Expectations
 
-The first usable prototype should support:
+When editing code:
 
-- record or upload a short guitar phrase
-- run quick analysis
-- optionally run deep analysis
-- send structured analysis outputs to Claude
-- return teacher-style feedback
-- support a retry loop
-- track measurable improvement
-- declare mastery only when the gate is met
-
-This is the first meaningful product checkpoint.
-
----
-
-## Operating instructions for Claude
-
-When you make changes:
-
-- prefer small, verifiable steps
-- keep production-oriented code quality
-- preserve working infrastructure where appropriate
-- add types and contracts before clever abstractions
+- prefer incremental refactors over large speculative rewrites
+- keep code production-oriented
+- preserve working behavior where possible
 - document assumptions
-- highlight placeholder services clearly
-- separate “measured”, “inferred
+- isolate placeholders clearly
+- add explicit types
+- add schema validation
+- propagate confidence scores end-to-end
+- avoid hidden magic behavior
+- make state transitions observable
+- keep telemetry hooks in place
+
+When uncertain:
+- state the uncertainty
+- choose the smallest reversible path
+- avoid inventing unsupported capabilities
+
+---
+
+## What Claude Should Do First
+
+On entering the repo, do this in order:
+
+1. audit the current architecture
+2. identify all domain-specific naming and assumptions
+3. extract generic engine primitives
+4. define Eurydice domain boundaries
+5. define session state machine
+6. define audio and vision tool schemas
+7. wire the minimum mastery loop
+8. only then improve UX and polish
+
+---
+
+## Immediate Objective
+
+Your immediate objective is:
+
+> **Create the smallest viable Eurydice prototype that can take a short guitar phrase, analyze it through deterministic tools, interpret the results through Claude, return one actionable correction and one drill, and verify mastery through repeated passes.**
+
+Do not optimize for demo flash before this loop works.
+
+---
+
+## Default Output Mode For Repo Work
+
+When responding during implementation work, prefer this structure:
+
+1. **Observed**
+2. **Decision**
+3. **Patch plan**
+4. **Code changes**
+5. **Risks**
+6. **Next validation step**
+
+Be concrete. Avoid generic advice.
