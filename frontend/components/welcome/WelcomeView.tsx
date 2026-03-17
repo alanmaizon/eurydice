@@ -1,9 +1,9 @@
 "use client"
 
 import { useState } from "react"
-import { Mic, Camera, FileText, BookOpen } from "lucide-react"
+import { Mic, Camera, FileText, BookOpen, Music, Target } from "lucide-react"
 import type { DifficultyLevel } from "@/lib/types"
-import { DIFFICULTY_LABELS, DIFFICULTY_COLORS } from "@/lib/constants"
+import { DIFFICULTY_LABELS, DIFFICULTY_COLORS, IS_EURYDICE } from "@/lib/constants"
 import { SystemInstructions } from "./SystemInstructions"
 import { FeatureCard } from "./FeatureCard"
 
@@ -72,24 +72,32 @@ export function WelcomeView({
         </div>
       </div>
 
-      {/* Feature D: Passage loader */}
+      {/* Passage / target loader */}
       <div>
         <button
           onClick={() => setShowPassageInput((v) => !v)}
           className="flex items-center gap-2 text-xs font-medium transition-colors"
           style={{ color: showPassageInput ? "var(--accent)" : "var(--text-secondary)" }}
         >
-          <BookOpen size={13} />
-          {showPassageInput ? "Cancel" : "Load a passage for close reading (optional)"}
+          {IS_EURYDICE ? <Target size={13} /> : <BookOpen size={13} />}
+          {showPassageInput
+            ? "Cancel"
+            : IS_EURYDICE
+            ? "Set a target passage or song section (optional)"
+            : "Load a passage for close reading (optional)"}
         </button>
         {showPassageInput && (
           <div className="mt-2 animate-fade-in">
             <textarea
               value={passageText}
               onChange={(e) => setPassageText(e.target.value)}
-              placeholder="Paste Greek text here…"
+              placeholder={
+                IS_EURYDICE
+                  ? "Describe or paste the passage you want to master (e.g. 'Intro riff from Smoke on the Water, 90 BPM')…"
+                  : "Paste Greek text here…"
+              }
               rows={4}
-              className="w-full rounded-lg px-3 py-2 text-sm greek outline-none resize-y"
+              className="w-full rounded-lg px-3 py-2 text-sm outline-none resize-y"
               style={{
                 border: "1px solid var(--border)",
                 background: "var(--surface)",
@@ -106,39 +114,62 @@ export function WelcomeView({
                 border: passageText.trim() ? "none" : "1px solid var(--border)",
               }}
             >
-              Pin passage
+              {IS_EURYDICE ? "Set target" : "Pin passage"}
             </button>
           </div>
         )}
       </div>
 
       {/* Feature cards */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <FeatureCard
-          icon={Mic}
-          iconColor="var(--accent)"
-          title="Speak to Logos"
-          subtitle="Ask questions aloud. Hear correct Attic pronunciation, parsing, and literary analysis — in realtime."
-        />
-        <FeatureCard
-          icon={Camera}
-          iconColor="#1a73e8"
-          title="Show Logos"
-          subtitle="Hold up a manuscript, inscription, or printed page. Logos will read, transcribe, and analyze it."
-        />
-        <FeatureCard
-          icon={FileText}
-          iconColor="#0f9d58"
-          title="Share your text"
-          subtitle="Paste a passage or Greek word. Get morphological parsing, scansion, and close reading on demand."
-        />
-      </div>
+      {IS_EURYDICE ? (
+        <div className="flex flex-col sm:flex-row gap-3">
+          <FeatureCard
+            icon={Mic}
+            iconColor="var(--accent)"
+            title="Play & get feedback"
+            subtitle="Record a 10–30s phrase. Eurydice scores your timing and notes, then gives you one targeted correction."
+          />
+          <FeatureCard
+            icon={Camera}
+            iconColor="#1a73e8"
+            title="Technique check"
+            subtitle="Show your fretting or picking hand. Eurydice detects collapsed wrists, excess finger lift, and more."
+          />
+          <FeatureCard
+            icon={Music}
+            iconColor="#0f9d58"
+            title="Master passages"
+            subtitle="Repeat a passage until you hit 3 clean passes at tempo. Mastery is measured, not assumed."
+          />
+        </div>
+      ) : (
+        <div className="flex flex-col sm:flex-row gap-3">
+          <FeatureCard
+            icon={Mic}
+            iconColor="var(--accent)"
+            title="Speak to Logos"
+            subtitle="Ask questions aloud. Hear correct Attic pronunciation, parsing, and literary analysis — in realtime."
+          />
+          <FeatureCard
+            icon={Camera}
+            iconColor="#1a73e8"
+            title="Show Logos"
+            subtitle="Hold up a manuscript, inscription, or printed page. Logos will read, transcribe, and analyze it."
+          />
+          <FeatureCard
+            icon={FileText}
+            iconColor="#0f9d58"
+            title="Share your text"
+            subtitle="Paste a passage or Greek word. Get morphological parsing, scansion, and close reading on demand."
+          />
+        </div>
+      )}
 
       <p
         className="text-center text-sm pb-2"
         style={{ color: "var(--text-muted)" }}
       >
-        Click <strong style={{ color: "var(--text-secondary)" }}>Start session</strong> below to begin streaming
+        Click <strong style={{ color: "var(--text-secondary)" }}>Start session</strong> below to begin
       </p>
     </div>
   )

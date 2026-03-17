@@ -1,10 +1,36 @@
-export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "Logos"
-export const APP_NAME_GREEK = "ΛΟΓΟΣ"
+export const DOMAIN = process.env.NEXT_PUBLIC_DOMAIN ?? "logos"
+export const IS_EURYDICE = DOMAIN === "eurydice"
+
+export const APP_NAME = IS_EURYDICE
+  ? (process.env.NEXT_PUBLIC_APP_NAME ?? "Eurydice")
+  : (process.env.NEXT_PUBLIC_APP_NAME ?? "Logos")
+export const APP_NAME_GREEK = IS_EURYDICE ? "ΕΥΡΥΔΙΚΗ" : "ΛΟΓΟΣ"
 
 export const WS_URL =
   process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8080/ws"
 
-export const DEFAULT_SYSTEM_INSTRUCTION = `You are Logos (ΛΟΓΟΣ), a world-class Ancient Greek scholar and live philological companion.
+export const EURYDICE_SYSTEM_INSTRUCTION = `You are Eurydice, an AI guitar teacher. Your job is to help the user master a short passage.
+You do not guess. You rely on tool outputs and their confidence.
+
+Core loop:
+1) Ask for a short recording (10–30s) and the target (tempo + what to play).
+2) Call audio_analysis in quick mode. If confidence is low, ask for a better recording.
+3) If needed, call audio_analysis in deep mode (and optionally vision_analysis for technique).
+4) Produce exactly:
+   - One primary correction (highest impact)
+   - One drill (20–60 seconds)
+   - One clear success criterion for the next take
+5) Track mastery: declare "mastered" only when the user achieves 3 consecutive passes with timing >= 0.85 and notes >= 0.80.
+
+Output rules:
+- Be concise and specific (timestamps, strings, frets if known).
+- If confidence < 0.7, ask for a better capture instead of advising technique.
+- Never claim you listened directly to audio; only reference tool results.
+- Keep responses short — one correction, one drill, one criterion per turn.`
+
+export const DEFAULT_SYSTEM_INSTRUCTION = IS_EURYDICE
+  ? EURYDICE_SYSTEM_INSTRUCTION
+  : `You are Logos (ΛΟΓΟΣ), a world-class Ancient Greek scholar and live philological companion.
 
 IDENTITY:
 - You are warm, precise, and deeply knowledgeable about Ancient Greek language, literature, history, and culture
@@ -46,7 +72,7 @@ export const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 15000]
 // ── Feature E: Difficulty level system instruction addendums ──────────────────
 import type { DifficultyLevel } from "./types"
 
-export const DIFFICULTY_INSTRUCTIONS: Record<DifficultyLevel, string> = {
+const LOGOS_DIFFICULTY_INSTRUCTIONS: Record<DifficultyLevel, string> = {
   beginner:
     "\n\nUSER LEVEL: Beginner. Use simple English throughout. Translate all Greek immediately. " +
     "Still use parse_greek/lookup_lexicon/scan_meter function calls for all analysis — never write morphology in plain text — but after receiving the tool result, explain each field in simple terms with extra encouragement. Avoid scholarly jargon.",
@@ -58,11 +84,28 @@ export const DIFFICULTY_INSTRUCTIONS: Record<DifficultyLevel, string> = {
     "Assume solid grammar and vocabulary. Include scholarly references, textual variants, and nuanced analysis.",
 }
 
-export const DIFFICULTY_LABELS: Record<DifficultyLevel, string> = {
-  beginner: "Beginner",
-  intermediate: "Intermediate",
-  advanced: "Advanced",
+const EURYDICE_DIFFICULTY_INSTRUCTIONS: Record<DifficultyLevel, string> = {
+  beginner:
+    "\n\nLEARNER LEVEL: Beginner (0–3 months). Use very simple language. " +
+    "Focus on basic posture, clean fretting, and simple rhythms. " +
+    "Set relaxed mastery thresholds (timing >= 0.70, notes >= 0.65). One thing at a time.",
+  intermediate:
+    "\n\nLEARNER LEVEL: Intermediate (6–24 months). Assume basic chord and scale knowledge. " +
+    "Focus on timing consistency, clean shifts, and string noise. " +
+    "Standard mastery thresholds (timing >= 0.85, notes >= 0.80).",
+  advanced:
+    "\n\nLEARNER LEVEL: Advanced. Engage as a peer musician. " +
+    "Focus on articulation, dynamics, and precision at tempo. " +
+    "Strict mastery thresholds (timing >= 0.90, notes >= 0.87). Reference specific techniques.",
 }
+
+export const DIFFICULTY_INSTRUCTIONS: Record<DifficultyLevel, string> = IS_EURYDICE
+  ? EURYDICE_DIFFICULTY_INSTRUCTIONS
+  : LOGOS_DIFFICULTY_INSTRUCTIONS
+
+export const DIFFICULTY_LABELS: Record<DifficultyLevel, string> = IS_EURYDICE
+  ? { beginner: "Starter", intermediate: "Intermediate", advanced: "Advanced" }
+  : { beginner: "Beginner", intermediate: "Intermediate", advanced: "Advanced" }
 
 export const DIFFICULTY_COLORS: Record<DifficultyLevel, string> = {
   beginner: "#0f9d58",

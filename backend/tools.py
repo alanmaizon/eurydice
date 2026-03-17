@@ -208,6 +208,153 @@ MOCK_SCANSION: dict[str, Any] = {
 }
 
 
+# ── Eurydice tool declarations (Anthropic-compatible, used by claude_client.py) ─
+
+EURYDICE_TOOL_DECLARATIONS = [
+    {
+        "name": "audio_analysis",
+        "description": (
+            "Analyze a guitar performance recording. "
+            "In 'quick' mode returns tempo, onset timing, and pitch scores quickly. "
+            "In 'deep' mode additionally runs note transcription (Basic Pitch) and "
+            "optional source separation (Demucs). "
+            "Always returns confidence values — if confidence is below 0.7 on any key "
+            "metric, report it and ask for a cleaner recording rather than guessing. "
+            "Call this tool instead of guessing about the user's playing."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["quick", "deep"],
+                    "description": "Analysis depth. Use 'quick' first; escalate to 'deep' if needed.",
+                },
+                "audio_b64": {
+                    "type": "string",
+                    "description": "Base64-encoded WAV or PCM audio of the guitar performance.",
+                },
+                "target_bpm": {
+                    "type": "number",
+                    "description": "Target tempo in BPM for alignment scoring. Optional.",
+                },
+                "target_notes": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "onset_s": {"type": "number"},
+                            "midi": {"type": "integer"},
+                        },
+                        "required": ["onset_s", "midi"],
+                    },
+                    "description": "Reference note events for note-level scoring. Optional.",
+                },
+                "has_backing_track": {
+                    "type": "boolean",
+                    "description": "Set true if the recording contains a backing track; triggers separation in deep mode.",
+                },
+            },
+            "required": ["mode"],
+        },
+    },
+    {
+        "name": "vision_analysis",
+        "description": (
+            "Analyze a photograph or video frame of a guitarist's hands/posture. "
+            "Returns detected hand landmarks, handedness, and technique flags such as "
+            "collapsed_wrist, excessive_finger_lift, thumb_over_neck, or pick_depth. "
+            "Each flag includes severity (low/medium/high) and confidence (0–1). "
+            "Only report flags whose confidence >= 0.6. "
+            "Call this tool when the user shares a camera image for technique feedback."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "image_b64": {
+                    "type": "string",
+                    "description": "Base64-encoded JPEG or PNG image of the guitarist.",
+                },
+                "focus": {
+                    "type": "string",
+                    "enum": ["fretting_hand", "picking_hand", "both", "posture"],
+                    "description": "Which aspect to focus the analysis on.",
+                },
+            },
+            "required": ["image_b64"],
+        },
+    },
+]
+
+
+# ── Eurydice mock results ──────────────────────────────────────────────────────
+
+MOCK_AUDIO_QUICK: dict[str, Any] = {
+    "mode": "quick",
+    "tempo_bpm": 92.4,
+    "tempo_confidence": 0.87,
+    "beat_times_s": [0.0, 0.65, 1.30, 1.95, 2.60],
+    "performance_scores": {
+        "timing": 0.78,
+        "notes": 0.82,
+        "overall": 0.80,
+    },
+    "warnings": [],
+    "_note": "Mock result — connect live audio pipeline for real analysis.",
+}
+
+MOCK_AUDIO_DEEP: dict[str, Any] = {
+    "mode": "deep",
+    "tempo_bpm": 92.4,
+    "tempo_confidence": 0.87,
+    "beat_times_s": [0.0, 0.65, 1.30, 1.95, 2.60],
+    "note_events": [
+        {"onset_s": 0.02, "offset_s": 0.60, "midi": 52, "confidence": 0.91},
+        {"onset_s": 0.68, "offset_s": 1.25, "midi": 54, "confidence": 0.88},
+        {"onset_s": 1.33, "offset_s": 1.92, "midi": 55, "confidence": 0.85},
+    ],
+    "performance_scores": {
+        "timing": 0.78,
+        "notes": 0.82,
+        "overall": 0.80,
+    },
+    "alignment": {
+        "mean_onset_error_ms": 42.0,
+        "max_onset_error_ms": 110.0,
+        "note_f1": 0.82,
+    },
+    "warnings": [],
+    "_note": "Mock result — connect Basic Pitch + librosa for real transcription.",
+}
+
+MOCK_VISION: dict[str, Any] = {
+    "hands_detected": 1,
+    "handedness": ["left"],
+    "technique_flags": [
+        {
+            "flag": "collapsed_wrist",
+            "severity": "medium",
+            "confidence": 0.74,
+            "description": "Left wrist appears slightly collapsed under the neck. Try arching it outward.",
+        }
+    ],
+    "capture_warnings": [],
+    "_note": "Mock result — connect MediaPipe Hands for real landmark detection.",
+}
+
+
+def execute_eurydice_tool_mock(tool_name: str, args: dict[str, Any]) -> Any:
+    """Return hardcoded mock results for Eurydice tool calls."""
+    if tool_name == "audio_analysis":
+        mode = args.get("mode", "quick")
+        return MOCK_AUDIO_DEEP if mode == "deep" else MOCK_AUDIO_QUICK
+    if tool_name == "vision_analysis":
+        return MOCK_VISION
+    return {"error": f"Unknown Eurydice tool: {tool_name}"}
+
+
+# ── Logos mock results (unchanged below) ─────────────────────────────────────
+
 def execute_tool_mock(tool_name: str, args: dict[str, Any]) -> Any:
     """Return hardcoded mock results for tool calls."""
     if tool_name == "parse_greek":

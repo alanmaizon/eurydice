@@ -94,8 +94,10 @@ import { formatTimestamp, cn } from "@/lib/utils"
 import { ParseCard } from "./ParseCard"
 import { LexiconCard } from "./LexiconCard"
 import { ScansionCard } from "./ScansionCard"
+import { AudioAnalysisCard, VisionAnalysisCard } from "./AnalysisCard"
 import { ImageMessage } from "./ImageMessage"
 import { StreamingIndicator } from "./StreamingIndicator"
+import { APP_NAME } from "@/lib/constants"
 
 interface MessageBubbleProps {
   message: TranscriptMessage
@@ -139,7 +141,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         style={{ color: "var(--text-muted)" }}
       >
         <span className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
-          {isUser ? "You" : "Logos"}
+          {isUser ? "You" : APP_NAME}
         </span>
         <span className="text-xs">{formatTimestamp(message.timestamp)}</span>
         {message.interrupted && (
@@ -186,10 +188,13 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           </div>
         )}
 
-        {/* Tool result cards */}
+        {/* Tool result cards — Logos */}
         {message.parseResult && <ParseCard result={message.parseResult} />}
         {message.lexiconResult && <LexiconCard result={message.lexiconResult} />}
         {message.scanResult && <ScansionCard result={message.scanResult} />}
+        {/* Tool result cards — Eurydice */}
+        {message.audioAnalysisResult && <AudioAnalysisCard result={message.audioAnalysisResult} />}
+        {message.visionAnalysisResult && <VisionAnalysisCard result={message.visionAnalysisResult} />}
 
         {/* Copy button */}
         {message.content && !message.isStreaming && (

@@ -11,6 +11,8 @@ import type {
   LexiconResult,
   ParseResult,
   ScansionResult,
+  AudioAnalysisResult,
+  VisionAnalysisResult,
   SessionState,
   ToolCallRecord,
   TranscriptMessage,
@@ -223,8 +225,15 @@ export function useSession() {
         case "tool.result": {
           const toolName = toolCallNamesRef.current.get(msg.call_id) ?? "parse_greek"
           // Route result to the correct card field based on which tool fired.
-          const cardPatch: Pick<TranscriptMessage, "parseResult" | "lexiconResult" | "scanResult"> =
-            toolName === "lookup_lexicon"
+          const cardPatch: Pick<
+            TranscriptMessage,
+            "parseResult" | "lexiconResult" | "scanResult" | "audioAnalysisResult" | "visionAnalysisResult"
+          > =
+            toolName === "audio_analysis"
+              ? { audioAnalysisResult: msg.result as AudioAnalysisResult }
+              : toolName === "vision_analysis"
+              ? { visionAnalysisResult: msg.result as VisionAnalysisResult }
+              : toolName === "lookup_lexicon"
               ? { lexiconResult: msg.result as LexiconResult }
               : toolName === "scan_meter"
               ? { scanResult: msg.result as ScansionResult }

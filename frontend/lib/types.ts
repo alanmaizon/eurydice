@@ -45,9 +45,13 @@ export interface TranscriptMessage {
   image?: string       // base64 data URL for inline images
   mimeType?: string
   // Tool result cards — at most one is set per message
+  // Logos tools
   parseResult?: ParseResult
   lexiconResult?: LexiconResult
   scanResult?: ScansionResult
+  // Eurydice tools
+  audioAnalysisResult?: AudioAnalysisResult
+  visionAnalysisResult?: VisionAnalysisResult
 }
 
 // ── Tool results ──────────────────────────────────────────────────────────────
@@ -94,6 +98,51 @@ export interface ScansionResult {
   meter: string
   pattern: string
   analysis: string | ScansionFoot[]
+}
+
+// ── Eurydice tool results ──────────────────────────────────────────────────────
+
+export interface PerformanceScores {
+  timing: number   // 0–1
+  notes: number    // 0–1
+  overall: number  // 0–1
+}
+
+export interface NoteEvent {
+  onset_s: number
+  offset_s: number
+  midi: number
+  confidence?: number
+}
+
+export interface AudioAnalysisResult {
+  mode: "quick" | "deep"
+  tempo_bpm?: number
+  tempo_confidence?: number
+  performance_scores?: PerformanceScores
+  note_events?: NoteEvent[]
+  alignment?: {
+    mean_onset_error_ms?: number
+    max_onset_error_ms?: number
+    note_f1?: number
+  }
+  warnings?: string[]
+  _note?: string
+}
+
+export interface TechniqueFlag {
+  flag: string
+  severity: "low" | "medium" | "high"
+  confidence: number
+  description?: string
+}
+
+export interface VisionAnalysisResult {
+  hands_detected: number
+  handedness?: string[]
+  technique_flags?: TechniqueFlag[]
+  capture_warnings?: string[]
+  _note?: string
 }
 
 // ── Inspector ─────────────────────────────────────────────────────────────────

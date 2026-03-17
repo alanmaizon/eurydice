@@ -11,7 +11,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from config import USE_MOCK
+from config import USE_MOCK, USE_CLAUDE
 
 
 @dataclass
@@ -64,6 +64,9 @@ async def handle_websocket(websocket: Any) -> None:
                     break
             except Exception:
                 break
+    elif USE_CLAUDE:
+        from claude_client import run_claude_session
+        await run_claude_session(websocket, config)
     else:
         from gemini_client import run_gemini_session
         await run_gemini_session(websocket, config)
