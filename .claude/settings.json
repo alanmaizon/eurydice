@@ -56,7 +56,17 @@
       "Bash(python -c \"import websockets; help\\(websockets.connect\\)\")",
       "Bash(python -m pytest backend/tests/test_e2e.py -v --tb=short)",
       "Bash(python -m pytest backend/tests/test_telemetry.py -v --tb=short)",
-      "Bash(python -m pytest backend/tests/test_e2e.py backend/tests/test_telemetry.py -v --tb=short)"
+      "Bash(python -m pytest backend/tests/test_e2e.py backend/tests/test_telemetry.py -v --tb=short)",
+      "Bash(npx playwright:*)",
+      "Bash(node -e \":*)",
+      "Bash(node --check quiz.mjs)",
+      "Bash(node --check scrape-answers.mjs)",
+      "Bash(curl -s http://localhost:9222/json/version)",
+      "Read(//Users/alanmaizon/eurydice/$HOME/Library/Application Support/Google/Chrome/**)",
+      "Read(//Users/alanmaizon/Library/Application Support/Google/Chrome/**)"
+    ],
+    "additionalDirectories": [
+      "/Users/alanmaizon/eurydice/scripts"
     ]
   },
   "hooks": {
