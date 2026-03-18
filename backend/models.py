@@ -138,3 +138,30 @@ class TargetSetMessage(BaseModel):
     target_bpm: Optional[float] = None
     target_notes: Optional[list[Any]] = None
     difficulty: str = "beginner"
+    preset_id: Optional[str] = None
+
+
+# ── Phase 5: Target validation ────────────────────────────────────────────────
+
+class TargetValidationMessage(BaseModel):
+    type: Literal["target.validation"] = "target.validation"
+    valid: bool
+    errors: list[str] = []
+    warnings: list[str] = []
+
+
+# ── Phase 6: Capture quality ──────────────────────────────────────────────────
+
+class CaptureInvalidMessage(BaseModel):
+    type: Literal["capture.invalid"] = "capture.invalid"
+    analysis_confidence: float
+    capture_quality: str = "unknown"  # "good" | "marginal" | "poor"
+    reasons: list[str] = []
+
+
+# ── Phase 7: Trust metrics ────────────────────────────────────────────────────
+
+class UserDisagreementMessage(BaseModel):
+    type: Literal["user.disagreement"] = "user.disagreement"
+    attempt_number: int
+    reason: str = ""

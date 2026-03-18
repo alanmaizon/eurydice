@@ -300,7 +300,23 @@ export function useSession() {
         case "mastery.achieved":
           addTranscriptMessage(
             "system",
-            `🎸 Mastered${msg.passage_description ? ` — "${msg.passage_description}"` : ""}! (${msg.total_attempts} attempt${msg.total_attempts !== 1 ? "s" : ""})`
+            `Mastered${msg.passage_description ? ` — "${msg.passage_description}"` : ""}! (${msg.total_attempts} attempt${msg.total_attempts !== 1 ? "s" : ""})`
+          )
+          break
+
+        case "target.validation":
+          if (!msg.valid) {
+            addTranscriptMessage("system", `Target invalid: ${msg.errors.join("; ")}`)
+          } else if (msg.warnings?.length) {
+            addTranscriptMessage("system", `Target set with warnings: ${msg.warnings.join("; ")}`)
+          }
+          break
+
+        case "capture.invalid":
+          addTranscriptMessage(
+            "system",
+            `Capture quality too low (confidence: ${Math.round(msg.analysis_confidence * 100)}%). ` +
+            `${msg.reasons.join(" ")} Try recording again with cleaner audio.`
           )
           break
 
@@ -509,8 +525,8 @@ export function useSession() {
 
   // ── Eurydice: define the target passage ────────────────────────────────────
   const setTarget = useCallback(
-    (description: string, targetBpm?: number, difficulty = "beginner") => {
-      send({ type: "target.set", description, target_bpm: targetBpm, difficulty })
+    (description: string, targetBpm?: number, difficulty = "beginner", presetId?: string) => {
+      send({ type: "target.set", description, target_bpm: targetBpm, difficulty, preset_id: presetId })
       setState((s) => ({ ...s, targetDescription: description, targetBpm: targetBpm ?? null }))
     },
     [send]
