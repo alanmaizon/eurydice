@@ -23,7 +23,7 @@ function ScoreBar({
 }) {
   const pct = Math.min(100, Math.round(score * 100))
   const thPct = Math.round(threshold * 100)
-  const fillColor = ok ? "#0f9d58" : score >= threshold * 0.85 ? "#b8860b" : "var(--text-muted)"
+  const fillColor = ok ? "#0f9d58" : score >= threshold * 0.9 ? "#b8860b" : "var(--text-muted)"
 
   return (
     <div className="flex items-center gap-2">

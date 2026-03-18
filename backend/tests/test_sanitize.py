@@ -1,34 +1,21 @@
 """
 Regression tests for transcript sanitization logic.
 
+Imports the real functions from gemini_client.py to test the actual source of truth.
+
 Run from repo root:
     cd backend && pip install pytest && python -m pytest tests/test_sanitize.py -v
 """
 
-import re
-
-# ── Replicate the exact regexes from gemini_client.py ────────────────────────
-# Keep these in sync with the source of truth in gemini_client.py.
-
-_CTRL_TOKEN_RE = re.compile(r'<ctrl\d+>', re.IGNORECASE)
-_CTRL_CHAR_RE = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\ufeff]')
-_TRANSLIT_PARENS_RE = re.compile(
-    r'([^\s]*[\u0370-\u03ff\u1f00-\u1fff][^\s]*)\s*\([A-Za-z\u00c0-\u024f\'-]{1,30}\)',
-)
+from gemini_client import _sanitize_transcript as sanitize, _TRANSLIT_PARENS_RE
 
 
-def sanitize(raw: str) -> str:
-    cleaned = _CTRL_TOKEN_RE.sub('', raw)
-    cleaned = _CTRL_CHAR_RE.sub('', cleaned)
-    cleaned = _TRANSLIT_PARENS_RE.sub(r'\1', cleaned)
-    return cleaned
+def strip(text: str) -> str:
+    """Apply only the transliteration stripping regex."""
+    return _TRANSLIT_PARENS_RE.sub(r'\1', text)
 
 
 # ── stripParentheticalTransliterations (via _TRANSLIT_PARENS_RE) ──────────────
-
-def strip(text: str) -> str:
-    return _TRANSLIT_PARENS_RE.sub(r'\1', text)
-
 
 class TestStripTransliterationParens:
     def test_strips_lowercase_transliteration(self):

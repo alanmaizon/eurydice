@@ -24,7 +24,16 @@
       "Bash(/opt/anaconda3/bin/python3 -m pytest tests/ -x -q)",
       "Bash(/opt/anaconda3/bin/python3 -c \":*)",
       "Bash(/opt/anaconda3/bin/python3 -m pytest tests/test_quick_llm.py tests/test_rubric_judge.py -v)",
-      "Bash(/opt/anaconda3/bin/python3 -m pytest tests/ -v)"
+      "Bash(/opt/anaconda3/bin/python3 -m pytest tests/ -v)",
+      "Bash(find /Users/alanmaizon/eurydice -name requirements.txt -o -name pyproject.toml -o -name .env* -o -name package.json)",
+      "Bash(python3 -c \"import ast; import sys; tree = ast.parse\\(open\\(''''claude_client.py''''\\).read\\(\\)\\); print\\(''''\\\\n''''.join\\([node.name for node in ast.walk\\(tree\\) if isinstance\\(node, ast.ImportFrom\\)]\\)\\)\")",
+      "Bash(grep -r \"IS_EURYDICE\\\\|IS_LOGOS\" /Users/alanmaizon/eurydice/frontend --include=*.ts --include=*.tsx)",
+      "Bash(grep -rn \"magic number\\\\|TODO\\\\|FIXME\\\\|BUG\\\\|HACK\" /Users/alanmaizon/eurydice/frontend --include=*.ts --include=*.tsx)",
+      "Bash(grep -rn \"0\\\\.85\\\\|0\\\\.70\\\\|0\\\\.65\\\\|0\\\\.80\\\\|0\\\\.90\\\\|0\\\\.87\\\\|35\" /Users/alanmaizon/eurydice/frontend/components /Users/alanmaizon/eurydice/frontend/hooks /Users/alanmaizon/eurydice/frontend/lib --include=*.ts --include=*.tsx)",
+      "Bash(find /Users/alanmaizon/eurydice/frontend/src -type f \\\\\\(-name *.ts -o -name *.tsx -o -name *.js -o -name *.jsx \\\\\\))",
+      "Bash(find /Users/alanmaizon/eurydice/frontend -maxdepth 2 -type f -name *.ts -o -name *.tsx -o -name *.js -o -name *.jsx)",
+      "Bash(grep -r \"import.*from\\\\|import.*\\\\{\" /Users/alanmaizon/eurydice/frontend/app --include=*.ts --include=*.tsx)",
+      "Bash(grep -r \"import.*from\\\\|import.*\\\\{\" /Users/alanmaizon/eurydice/frontend/components --include=*.ts --include=*.tsx)"
     ]
   },
   "hooks": {

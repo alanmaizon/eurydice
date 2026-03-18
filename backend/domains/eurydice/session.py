@@ -16,6 +16,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from domains.eurydice.config import (
+    CONSECUTIVE_PASSES_REQUIRED,
+    CONFIDENCE_GATE,
+    DIFFICULTY_THRESHOLDS,
+)
+
 
 # ── State machine ─────────────────────────────────────────────────────────────
 
@@ -91,9 +97,6 @@ class AttemptRecord:
 
 
 # ── Mastery gate ───────────────────────────────────────────────────────────────
-
-CONSECUTIVE_PASSES_REQUIRED = 3
-CONFIDENCE_GATE = 0.70
 
 
 @dataclass
@@ -333,16 +336,10 @@ class EurydiceSession:
         )
         self.target_set_at = time.time()
 
-        # Adjust mastery thresholds by difficulty
-        if difficulty == "beginner":
-            self.mastery_gate.timing_threshold = 0.75
-            self.mastery_gate.notes_threshold   = 0.70
-        elif difficulty == "intermediate":
-            self.mastery_gate.timing_threshold = 0.85
-            self.mastery_gate.notes_threshold   = 0.80
-        elif difficulty == "advanced":
-            self.mastery_gate.timing_threshold = 0.92
-            self.mastery_gate.notes_threshold   = 0.90
+        # Adjust mastery thresholds by difficulty (from config)
+        thresholds = DIFFICULTY_THRESHOLDS.get(difficulty, DIFFICULTY_THRESHOLDS["beginner"])
+        self.mastery_gate.timing_threshold = thresholds["timing"]
+        self.mastery_gate.notes_threshold  = thresholds["notes"]
 
         self.transition(SessionState.TARGET_SELECTED)
         return result

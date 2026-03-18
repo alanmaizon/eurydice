@@ -11,29 +11,8 @@ Run:
     cd backend && python -m pytest tests/test_spoken_safe.py -v
 """
 
-import sys
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-# Import only the pure helper — avoids loading google-genai / config at import time.
-# We replicate _VISUAL_ONLY_FIELDS and _make_spoken_safe here so the test is
-# self-contained; if the source changes, the test will catch the divergence.
-from typing import Any
-
-_VISUAL_ONLY_FIELDS: dict[str, frozenset] = {
-    "parse_greek":    frozenset({"transliteration", "ipa", "principal_parts"}),
-    "lookup_lexicon": frozenset({"transliteration", "principal_parts", "key_refs"}),
-    # pattern (— ∪∪ notation) and analysis (complex foot array) are both visual-only
-    "scan_meter":     frozenset({"pattern", "analysis"}),
-}
-
-
-def _make_spoken_safe(tool_name: str, result: Any) -> Any:
-    if not isinstance(result, dict):
-        return result
-    drop = _VISUAL_ONLY_FIELDS.get(tool_name, frozenset())
-    return {k: v for k, v in result.items() if k not in drop}
+# Import the real production functions — tests verify actual behavior, not local copies.
+from gemini_client import _make_spoken_safe
 
 
 # ── parse_greek ───────────────────────────────────────────────────────────────

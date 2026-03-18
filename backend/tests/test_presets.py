@@ -28,6 +28,7 @@ def test_list_presets_returns_summaries():
 
 
 def test_all_presets_have_valid_notes():
+    assert len(PRESET_PASSAGES) > 0, "No presets defined"
     for p in PRESET_PASSAGES:
         for note in p["target_notes"]:
             assert isinstance(note["onset_s"], (int, float))

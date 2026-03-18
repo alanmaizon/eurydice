@@ -4,10 +4,11 @@ import type { AudioAnalysisResult, VisionAnalysisResult } from "@/lib/types"
 
 // ── Score bar ─────────────────────────────────────────────────────────────────
 
-function ScoreBar({ label, value }: { label: string; value: number }) {
+function ScoreBar({ label, value, threshold }: { label: string; value: number; threshold?: number }) {
   const pct = Math.round(value * 100)
+  const th = threshold ?? 0.85
   const color =
-    value >= 0.85 ? "#0f9d58" : value >= 0.70 ? "#b8860b" : "#ea4335"
+    value >= th ? "#0f9d58" : value >= th * 0.82 ? "#b8860b" : "#ea4335"
   return (
     <div className="flex items-center gap-2 text-xs">
       <span className="w-14 shrink-0" style={{ color: "var(--text-secondary)" }}>
