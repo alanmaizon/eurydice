@@ -33,7 +33,18 @@
       "Bash(find /Users/alanmaizon/eurydice/frontend/src -type f \\\\\\(-name *.ts -o -name *.tsx -o -name *.js -o -name *.jsx \\\\\\))",
       "Bash(find /Users/alanmaizon/eurydice/frontend -maxdepth 2 -type f -name *.ts -o -name *.tsx -o -name *.js -o -name *.jsx)",
       "Bash(grep -r \"import.*from\\\\|import.*\\\\{\" /Users/alanmaizon/eurydice/frontend/app --include=*.ts --include=*.tsx)",
-      "Bash(grep -r \"import.*from\\\\|import.*\\\\{\" /Users/alanmaizon/eurydice/frontend/components --include=*.ts --include=*.tsx)"
+      "Bash(grep -r \"import.*from\\\\|import.*\\\\{\" /Users/alanmaizon/eurydice/frontend/components --include=*.ts --include=*.tsx)",
+      "Bash(find /Users/alanmaizon/eurydice/frontend -maxdepth 2 -name vitest.config* -o -name playwright.config* -o -name .playwright*)",
+      "Bash(python -c \"from starlette.testclient import TestClient; print\\(''starlette TestClient available''\\)\")",
+      "Bash(python -c \"import httpx; print\\(''httpx available''\\)\")",
+      "Bash(USE_MOCK=true python -m pytest tests/test_ws_integration.py -v --timeout=30)",
+      "Bash(USE_MOCK=true python -m pytest tests/test_ws_integration.py -v)",
+      "Bash(python -m pytest tests/test_ws_integration.py -v)",
+      "Bash(gtimeout 120 python -m pytest tests/test_ws_integration.py::TestHealthEndpoint -v)",
+      "Bash(python -m pytest tests/test_ws_integration.py::TestHealthEndpoint -v)",
+      "Bash(python -m pytest tests/test_ws_integration.py::TestSessionLifecycle::test_session_start_handshake -v)",
+      "Bash(python -c \"from mock_mode import _classify_input; print\\(_classify_input\\(''scan the hexameter rhythm of a verse''\\)\\)\")",
+      "Bash(python -m pytest tests/test_ws_eurydice.py -v)"
     ]
   },
   "hooks": {
