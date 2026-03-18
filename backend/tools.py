@@ -227,6 +227,7 @@ MOCK_AUDIO_QUICK: dict[str, Any] = {
         "notes": 0.82,
         "overall": 0.80,
     },
+    "analysis_confidence": 0.87,
     "warnings": [],
     "_note": "Mock result — connect live audio pipeline for real analysis.",
 }
@@ -251,6 +252,7 @@ MOCK_AUDIO_DEEP: dict[str, Any] = {
         "max_onset_error_ms": 110.0,
         "note_f1": 0.82,
     },
+    "analysis_confidence": 0.87,
     "warnings": [],
     "_note": "Mock result — connect Basic Pitch + librosa for real transcription.",
 }
