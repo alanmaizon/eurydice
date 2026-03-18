@@ -63,6 +63,26 @@ def _to_anthropic_tools(declarations: list[dict[str, Any]]) -> list[dict[str, An
 ANTHROPIC_TOOLS = _to_anthropic_tools(EURYDICE_TOOL_DECLARATIONS)
 
 
+_TARGET_PARSE_SYSTEM = (
+    "You extract structured fields from a guitar practice target description. "
+    "Return JSON with these optional fields:\n"
+    '  "clean_description": the passage description without BPM/difficulty mentions,\n'
+    '  "bpm": integer BPM if mentioned (null otherwise),\n'
+    '  "difficulty": "beginner"|"intermediate"|"advanced" if inferable (null otherwise)\n'
+    "Only include fields you are confident about. Respond with JSON only."
+)
+
+
+async def _parse_target_description(client: Any, description: str) -> dict[str, Any]:
+    """Use Haiku to extract BPM/difficulty from free-text target descriptions."""
+    from engine.orchestration.quick_llm import quick_llm_json
+    return await quick_llm_json(
+        client,
+        f"Extract structured fields from this guitar practice target:\n\n{description}",
+        system=_TARGET_PARSE_SYSTEM,
+    )
+
+
 async def run_claude_session(websocket: Any, config: dict[str, Any]) -> None:
     """
     Top-level Claude session handler.
@@ -129,7 +149,7 @@ async def run_claude_session(websocket: Any, config: dict[str, Any]) -> None:
 
             # Stream this Claude call
             async with client.messages.stream(
-                model="claude-opus-4-6",
+                model=settings.claude_model,
                 max_tokens=4096,
                 system=effective_system,
                 messages=messages,
@@ -186,19 +206,31 @@ async def run_claude_session(websocket: Any, config: dict[str, Any]) -> None:
                 tool_name: str = tu["name"]
                 args: dict[str, Any] = tu["input"]
 
-                # Inject target context into audio_analysis args
+                # Inject session context into audio_analysis args
                 if tool_name == "audio_analysis":
+                    # Inject pending audio from server-side storage
+                    if sess.pending_audio_b64 and "audio_b64" not in args:
+                        args["audio_b64"] = sess.pending_audio_b64
+                        sess.pending_audio_b64 = None  # consumed
                     if sess.target.target_bpm and "target_bpm" not in args:
                         args["target_bpm"] = sess.target.target_bpm
                     if sess.target.target_notes and "target_notes" not in args:
                         args["target_notes"] = sess.target.target_notes
                     prev_state = sess.state
                     mode = args.get("mode", "quick")
-                    sess.transition(
+                    target = (
                         SessionState.PROCESSING_DEEP if mode == "deep"
                         else SessionState.PROCESSING_QUICK
                     )
-                    await emit_state(prev_state)
+                    if sess.transition(target):
+                        await emit_state(prev_state)
+                    else:
+                        logger.warning(
+                            "Invalid state transition %s → %s, forcing",
+                            prev_state.value, target.value,
+                        )
+                        sess.force_state(target)
+                        await emit_state(prev_state)
 
                 await send(ToolCallMessage(tool_name=tool_name, args=args, call_id=call_id))
                 await send(LogMessage(
@@ -287,6 +319,12 @@ async def run_claude_session(websocket: Any, config: dict[str, Any]) -> None:
                             )
                             await emit_state(prev_state)
 
+                # coaching_response with a drill → transition to DRILL_ASSIGNED
+                if tool_name == "coaching_response" and result.get("drill"):
+                    prev_state = sess.state
+                    if sess.transition(SessionState.DRILL_ASSIGNED):
+                        await emit_state(prev_state)
+
                 await send(ToolResultMessage(call_id=call_id, result=result))
                 await send(LogMessage(
                     event="tool.executed",
@@ -339,6 +377,21 @@ async def run_claude_session(websocket: Any, config: dict[str, Any]) -> None:
                 target_bpm = msg.get("target_bpm")
                 target_notes = msg.get("target_notes")
                 difficulty = msg.get("difficulty", "beginner")
+
+                # Haiku-powered free-text parsing: extract BPM/difficulty
+                # hints from natural language when not explicitly provided
+                if description and not preset_id and (target_bpm is None or difficulty == "beginner"):
+                    try:
+                        parsed = await _parse_target_description(client, description)
+                        if target_bpm is None and parsed.get("bpm"):
+                            target_bpm = parsed["bpm"]
+                        if difficulty == "beginner" and parsed.get("difficulty"):
+                            difficulty = parsed["difficulty"]
+                        # Optionally clean the description
+                        if parsed.get("clean_description"):
+                            description = parsed["clean_description"]
+                    except Exception:
+                        logger.debug("Haiku target parsing skipped", exc_info=True)
 
                 if preset_id:
                     from presets import get_preset
@@ -405,9 +458,12 @@ async def run_claude_session(websocket: Any, config: dict[str, Any]) -> None:
                 await handle_turn(user_content, _system_with_context())
 
             elif msg_type == "input.audio_recording":
-                # Full WAV buffer from the recording button — trigger audio analysis
+                # Full WAV buffer from the recording button — trigger audio analysis.
+                # Audio is stored server-side on the session to avoid inflating
+                # Claude's conversation history with a ~1 MB base64 blob.
                 audio_b64: str = msg["audio_b64"]
                 duration_s: float | None = msg.get("duration_s")
+                sess.pending_audio_b64 = audio_b64
                 prev = sess.state
                 sess.transition(SessionState.RECORDING)
                 await emit_state(prev)
@@ -416,17 +472,11 @@ async def run_claude_session(websocket: Any, config: dict[str, Any]) -> None:
                     "text": (
                         f"The user just recorded a guitar take"
                         + (f" ({duration_s:.1f}s)" if duration_s else "")
-                        + ". The audio is attached as base64 WAV in the audio_b64 field below. "
-                        "Call audio_analysis with mode='quick' and this audio_b64 to score the take."
-                        f"\naudio_b64: {audio_b64[:40]}... (truncated for display)"
+                        + ". The audio is held server-side. "
+                        "Call audio_analysis with mode='quick' to score the take — "
+                        "the audio_b64 will be injected automatically."
                     ),
                 }]
-                # Pass the actual audio_b64 via a separate content block so the model can forward it
-                # to the tool — we attach it as a structured hint rather than raw text
-                user_content.append({
-                    "type": "text",
-                    "text": f"__AUDIO_B64__:{audio_b64}",
-                })
                 await handle_turn(user_content, _system_with_context())
 
             elif msg_type == "input.image":

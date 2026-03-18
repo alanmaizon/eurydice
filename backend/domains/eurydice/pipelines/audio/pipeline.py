@@ -123,11 +123,19 @@ def analyze_audio(args: dict[str, Any]) -> dict[str, Any]:
         "capture_quality": capture_quality,
         "performance_scores": {
             "timing": round(timing_score, 2),
+            # Quick mode: notes score is a pitch-confidence proxy, not actual note
+            # accuracy. Deep mode replaces this with real note F1 from Basic Pitch.
             "notes": round(min(pitch_confidence + 0.1, 1.0), 2),
             "overall": round((timing_score + min(pitch_confidence + 0.1, 1.0)) / 2, 2),
         },
         "warnings": warnings,
     }
+
+    if mode == "quick":
+        warnings.append(
+            "Quick mode: notes score is a pitch-confidence proxy. "
+            "Use deep mode for actual note-level accuracy scoring."
+        )
 
     # ── Deep mode: Basic Pitch transcription ──────────────────────────────────
     if mode == "deep":

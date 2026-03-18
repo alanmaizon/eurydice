@@ -1,8 +1,10 @@
 """
-Tool definitions and executors for Logos.
+Tool definitions and executors for all domains.
 
-In production (non-mock) mode, tool execution uses a separate Gemini call to
-generate structured philological data. In mock mode, hardcoded examples are used.
+Logos: philological tools (parse_greek, lookup_lexicon, scan_meter) executed
+via Gemini or mock data.
+Eurydice: music analysis tools (audio_analysis, vision_analysis, coaching_response)
+executed via real pipelines or mock data.
 """
 
 from typing import Any

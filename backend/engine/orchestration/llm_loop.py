@@ -19,7 +19,7 @@ async def run_agentic_loop(
     tools: list[dict[str, Any]],
     system: str | None,
     *,
-    model: str = "claude-opus-4-6",
+    model: str = "claude-sonnet-4-6",
     max_tokens: int = 4096,
     on_text_delta: Callable[[str], Awaitable[None]],
     on_text_done: Callable[[str], Awaitable[None]],

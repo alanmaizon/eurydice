@@ -5,6 +5,8 @@ from typing import Optional
 class Settings(BaseSettings):
     # ── Anthropic (Eurydice / Claude orchestration) ───────────────────────────
     anthropic_api_key: Optional[str] = None
+    claude_model: str = "claude-sonnet-4-6"
+    claude_haiku_model: str = "claude-haiku-4-5-20251001"
 
     # ── Google AI Studio (Logos / Gemini Live) ────────────────────────────────
     gemini_api_key: Optional[str] = None

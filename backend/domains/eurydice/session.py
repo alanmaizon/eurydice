@@ -58,6 +58,9 @@ _VALID_TRANSITIONS: set[tuple[SessionState, SessionState]] = {
     # Any state → mastered (gate can trigger after deep or quick)
     (SessionState.FEEDBACK_QUICK,   SessionState.MASTERED),
     (SessionState.FEEDBACK_DEEP,    SessionState.MASTERED),
+    # Mastered → restart with new target
+    (SessionState.MASTERED,         SessionState.TARGET_SELECTED),
+    (SessionState.MASTERED,         SessionState.IDLE),
     # Any state → error
     *{(s, SessionState.ERROR) for s in SessionState},
 }
@@ -247,6 +250,9 @@ class EurydiceSession:
         # Timing fields for telemetry (Phase 7)
         self.target_set_at: float | None = None
         self.first_feedback_at: float | None = None
+        # Pending audio — stored server-side so the base64 blob never enters
+        # Claude's conversation history (saves tokens + avoids inflating context)
+        self.pending_audio_b64: str | None = None
 
     # ── State transitions ──────────────────────────────────────────────────────
 

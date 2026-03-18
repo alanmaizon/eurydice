@@ -17,7 +17,12 @@
       "Bash(npx tsc:*)",
       "Bash(./node_modules/.bin/tsc --noEmit)",
       "Bash(node_modules/.bin/tsc --noEmit)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(gh pr:*)",
+      "Bash(git status:*)",
+      "Bash(find backend:*)",
+      "Bash(/opt/anaconda3/bin/python3 -m pytest tests/ -x -q)",
+      "Bash(/opt/anaconda3/bin/python3 -c \":*)"
     ]
   },
   "hooks": {

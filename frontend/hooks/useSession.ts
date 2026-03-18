@@ -286,9 +286,11 @@ export function useSession() {
           break
 
         case "mastery.update": {
+          // passes_needed from backend is "remaining" (required - consecutive).
+          // Frontend passesNeeded means "total required" for rendering streak dots.
           const ms: MasteryState = {
             consecutivePasses: msg.consecutive_passes,
-            passesNeeded: msg.passes_needed,
+            passesNeeded: msg.consecutive_passes + msg.passes_needed,
             mastered: msg.mastered,
             attemptNumber: msg.attempt_number,
             gateDetail: msg.gate_detail,
