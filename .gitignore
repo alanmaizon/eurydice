@@ -29,4 +29,4 @@ sgml/*
 sgml/xml/*
 !sgml/xml/classics.xml
 
-.claude/
+.claude/*
